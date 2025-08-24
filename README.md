@@ -12,18 +12,6 @@
 
 ✅ Веб-интерфейс для просмотра заказов
 
-Архитектура:
-test_service/
-├── cmd/server/           # Главное приложение
-├── internal/             # Внутренние пакеты
-│   ├── cache/           # Кэш в памяти
-│   ├── database/        # Работа с PostgreSQL
-│   ├── handler/         # HTTP обработчики
-│   ├── kafka/           # Kafka consumer
-│   ├── models/          # Модели данных
-│   └── service/         # Бизнес-логика
-│── web/static/          # Веб-интерфейс
-
 Старт:
 1.git clone <repository-url>
   cd test_service
