@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Order Service</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .search-form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .order-info {
+            display: none;
+            margin-top: 20px;
+        }
+        .section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        .section h3 {
+            margin-top: 0;
+            color: #007bff;
+        }
+        .error {
+            color: #dc3545;
+            padding: 10px;
+            background: #f8d7da;
+            border-radius: 5px;
+            display: none;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        .item {
+            padding: 10px;
+            margin: 5px 0;
+            background: white;
+            border-radius: 3px;
+            border: 1px solid #ddd;
+        }
+        
+        .stats-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border-left: 4px solid #28a745;
+        }
+        
+        .stats-section h3 {
+            margin-top: 0;
+            color: #28a745;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        
+        .stat-label {
+            font-weight: bold;
+            color: #666;
+        }
+        
+        .stat-value {
+            font-weight: bold;
+            color: #007bff;
+        }
+        
+        .refresh-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .refresh-btn:hover {
+            background: #218838;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Order Service</h1>
+        
+        <div class="search-form">
+            <input type="text" id="orderId" placeholder="Enter Order ID">
+            <button onclick="getOrder()">Get Order</button>
+        </div>
+        
+        <div class="stats-section">
+            <h3>Request Performance</h3>
+            <div id="serverStats" class="stats-grid">
+                <div class="stat-item">
+                    <span class="stat-label">Cache Size:</span>
+                    <span id="cacheSize" class="stat-value">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Last Request Time:</span>
+                    <span id="lastRequestTime" class="stat-value">Never</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Last Request Duration:</span>
+                    <span id="lastRequestDuration" class="stat-value">0ms</span>
+                </div>
+            </div>
+            <button onclick="refreshStats()" class="refresh-btn">Refresh Stats</button>
+        </div>
+
+        <div id="error" class="error"></div>
+        
+        <div id="loading" class="loading">
+            Loading...
+        </div>
+
+        <div id="orderInfo" class="order-info">
+            <div class="section">
+                <h3>Order Information</h3>
+                <div id="orderBasic"></div>
+            </div>
+            
+            <div class="section">
+                <h3>Delivery Information</h3>
+                <div id="deliveryInfo"></div>
+            </div>
+            
+            <div class="section">
+                <h3>Payment Information</h3>
+                <div id="paymentInfo"></div>
+            </div>
+            
+            <div class="section">
+                <h3>Items</h3>
+                <div id="itemsList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js?v=1"></script>
+</body>
+</html>
