@@ -32,7 +32,7 @@ func LoadFromEnv() (*Config, error) {
 		cfg.ServerAddr = ":8081"
 	}
 
-	// Postgres DSN (секреты из окружения)
+	//Postgres DSN (секреты из окружения)
 	if v := strings.TrimSpace(os.Getenv("POSTGRES_DSN")); v != "" {
 		cfg.PostgresDSN = v
 	} else {
