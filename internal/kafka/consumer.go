@@ -40,14 +40,34 @@ func (c *Consumer) Consume(ctx context.Context, processFunc func(*models.Order) 
 			// Получаем сообщение из Kafka
 			msg, err := c.reader.FetchMessage(ctx)
 			if err != nil {
-				log.Printf("Ошибка при получении сообщения: %v", err)
-				continue
+				// Если контекст отменен, выходим
+				select {
+				case <-ctx.Done():
+					return nil
+				default:
+					log.Printf("Ошибка при получении сообщения: %v", err)
+					continue
+				}
 			}
 
 			// Декодируем JSON сообщение в структуру заказа
 			var order models.Order
 			if err := json.Unmarshal(msg.Value, &order); err != nil {
 				log.Printf("Ошибка дешифровки сообщения: %v", err)
+				// Сообщение невалидно как JSON — подтверждаем, чтобы не зациклиться
+				if err := c.reader.CommitMessages(ctx, msg); err != nil {
+					log.Printf("Ошибка commit невалидного сообщения: %v", err)
+				}
+				continue
+			}
+
+			// Валидация полезной нагрузки
+			if err := order.Validate(); err != nil {
+				log.Printf("Невалидный заказ %v: %v", order.OrderUID, err)
+				// Пропускаем сообщение и коммитим, чтобы не зациклиться
+				if err := c.reader.CommitMessages(ctx, msg); err != nil {
+					log.Printf("Ошибка commit невалидного сообщения: %v", err)
+				}
 				continue
 			}
 
