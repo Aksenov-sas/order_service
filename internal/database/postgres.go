@@ -40,7 +40,7 @@ func NewPostgres(ctx context.Context, connectStr string) (*Postgres, error) {
 
 // Init инициализирует базу данных, создавая необходимые таблицы и индексы
 func (p *Postgres) Init(ctx context.Context) error {
-	// SQL запросы для создания таблиц
+	// SQL запросы для создания таблиц и индексов
 	queries := []string{
 		// Таблица заказов
 		`CREATE TABLE IF NOT EXISTS orders (
@@ -112,6 +112,31 @@ func (p *Postgres) Init(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("Ошибка выполнения запроса %s: %v", query, err)
 		}
+	}
+
+	// Простейшая миграционная таблица для детерминированных миграций
+	if _, err := p.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT NOW())`); err != nil {
+		return fmt.Errorf("Ошибка создания schema_migrations: %v", err)
+	}
+
+	type migration struct{ id, sql string }
+	migrations := []migration{}
+	for _, m := range migrations {
+		var exists bool
+		err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE id=$1)`, m.id).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("Ошибка проверки миграции %s: %v", m.id, err)
+		}
+		if exists {
+			continue
+		}
+		if _, err := p.pool.Exec(ctx, m.sql); err != nil {
+			return fmt.Errorf("Ошибка применения миграции %s: %v", m.id, err)
+		}
+		if _, err := p.pool.Exec(ctx, `INSERT INTO schema_migrations (id) VALUES ($1)`, m.id); err != nil {
+			return fmt.Errorf("Ошибка записи миграции %s: %v", m.id, err)
+		}
+		log.Printf("Применена миграция: %s", m.id)
 	}
 
 	log.Println("БД инициализирована")
