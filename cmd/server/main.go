@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"test_service/internal/config"
 	"test_service/internal/database"
 	"test_service/internal/handler"
 	"test_service/internal/kafka"
@@ -20,17 +22,15 @@ func main() {
 	// Создаем основной контекст
 	ctx := context.Background()
 
-	// Настройки подключения к базе данных PostgreSQL
-	postgresConnStr := "host=localhost port=5433 user=postgres password=postgres dbname=order_db sslmode=disable"
-
-	// Настройки Kafka
-	kafkaBrokers := []string{"localhost:9092"}
-	kafkaTopic := "orders"
-	kafkaGroupID := "order-service-group"
+	// Загружаем конфигурацию из окружения
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		log.Fatalf("Ошибка загрузки конфигурации: %v", err)
+	}
 
 	// Подключение к базе данных
 	log.Println("Подключение к БД...")
-	db, err := database.NewPostgres(ctx, postgresConnStr)
+	db, err := database.NewPostgres(ctx, cfg.PostgresDSN)
 	if err != nil {
 		log.Fatalf("Ошибка подключения к БД: %v", err)
 	}
@@ -44,8 +44,13 @@ func main() {
 	// Создание сервиса для работы с заказами
 	svc := service.New(db)
 
+	// Прогрев кэша перед запуском обработчиков
+	if err := svc.WarmUpCache(ctx); err != nil {
+		log.Printf("Ошибка прогрева кэша: %v", err)
+	}
+
 	// Создание Kafka consumer для обработки новых заказов
-	kafkaConsumer := kafka.NewConsumer(kafkaBrokers, kafkaTopic, kafkaGroupID)
+	kafkaConsumer := kafka.NewConsumer(cfg.KafkaBrokers, cfg.KafkaTopic, cfg.KafkaGroupID)
 	defer kafkaConsumer.Close()
 
 	// Контекст для управления Kafka consumer
@@ -53,11 +58,13 @@ func main() {
 	defer cancelConsumer()
 
 	// Запуск Kafka consumer в отдельной горутине
+	consumerDone := make(chan struct{})
 	go func() {
-		log.Printf("Начало работы Kafka consumer для: %s", kafkaTopic)
+		log.Printf("Начало работы Kafka consumer для: %s", cfg.KafkaTopic)
 		if err := kafkaConsumer.Consume(consumerCtx, svc.ProcessOrder); err != nil {
 			log.Printf("Ошибка работы в Kafka consumer: %v", err)
 		}
+		close(consumerDone)
 	}()
 
 	// Создание HTTP обработчиков
@@ -69,19 +76,35 @@ func main() {
 	mux.HandleFunc("/health", h.HealthCheck) // Проверка состояния сервиса
 	mux.HandleFunc("/stats", h.Stats)        // Статистика сервиса
 
-	// Статические файлы для веб-интерфейса
-	fs := http.FileServer(http.Dir("./web/static"))
-	mux.Handle("/", fs)
+	// Статические файлы и корневая страница
+	staticFS := http.Dir(cfg.StaticDir)
+	log.Printf("Обслуживание статических файлов из: %s", cfg.StaticDir)
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(staticFS)))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Если запрос корня — сразу index.html
+		if r.URL.Path == "/" {
+			http.ServeFile(w, r, filepath.Join(cfg.StaticDir, "index.html"))
+			return
+		}
+		// Проверяем существование файла в STATIC_DIR безопасно
+		candidate := filepath.Clean(filepath.Join(cfg.StaticDir, r.URL.Path))
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			http.ServeFile(w, r, candidate)
+			return
+		}
+		// Фоллбэк на index.html
+		http.ServeFile(w, r, filepath.Join(cfg.StaticDir, "index.html"))
+	})
 
 	// Создание HTTP сервера
 	server := &http.Server{
-		Addr:    ":8081",
+		Addr:    cfg.ServerAddr,
 		Handler: mux,
 	}
 
 	// Запуск HTTP сервера в отдельной горутине
 	go func() {
-		log.Printf("Сервер запущен на порте 8081")
+		log.Printf("Сервер запущен на %s", cfg.ServerAddr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Ошибка сервера:%v", err)
 		}
@@ -102,5 +125,11 @@ func main() {
 		log.Printf("ошибка:%v", err)
 	}
 	cancelConsumer()
+	// Дожидаемся завершения consumer
+	select {
+	case <-consumerDone:
+	case <-time.After(10 * time.Second):
+		log.Println("Таймаут ожидания остановки consumer")
+	}
 	log.Println("Сервер остановлен успешно")
 }
