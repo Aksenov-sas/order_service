@@ -32,6 +32,18 @@ func New(db *database.Postgres) *Service {
 	return svc
 }
 
+// WarmUpCache загружает все заказы из БД в кэш при старте сервиса.
+func (s *Service) WarmUpCache(ctx context.Context) error {
+	orders, err := s.db.GetAllOrders(ctx)
+	if err != nil {
+		return err
+	}
+	// Загружаем в кэш целиком
+	s.cache.LoadFromSlice(orders)
+	log.Printf("Кэш прогрет: %d заказов", s.cache.Size())
+	return nil
+}
+
 // ProcessOrder обрабатывает новый заказ: сохраняет в БД и добавляет в кэш
 func (s *Service) ProcessOrder(order *models.Order) error {
 	// Создаем контекст с таймаутом 10 секунд
