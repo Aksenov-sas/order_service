@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -105,7 +106,7 @@ func main() {
 	// Запуск HTTP сервера в отдельной горутине
 	go func() {
 		log.Printf("Сервер запущен на %s", cfg.ServerAddr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Ошибка сервера:%v", err)
 		}
 	}()
