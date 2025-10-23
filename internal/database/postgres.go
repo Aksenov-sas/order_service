@@ -1,4 +1,4 @@
-// Пакет database содержит логику работы с базой данных PostgreSQL
+// Package database содержит логику работы с базой данных PostgreSQL
 package database
 
 import (
@@ -150,8 +150,11 @@ func (p *Postgres) SaveOrder(ctx context.Context, order *models.Order) error {
 	if err != nil {
 		return fmt.Errorf("Ошибка начала транзакции: %v", err)
 	}
-	defer tx.Rollback(ctx) // Откатываем транзакцию в случае ошибки
-
+	defer func() {
+		if err := tx.Rollback(ctx); err != nil {
+			log.Printf("Ошибка при откате транзакции: %v", err)
+		} // Откатываем транзакцию в случае ошибки
+	}()
 	// Сохраняем основную информацию о заказе (UPSERT)
 	_, err = tx.Exec(ctx, `INSERT INTO orders (order_uid, track_number, entry, locale, internal_signature, 
 			customer_id, delivery_service, shardkey, sm_id, date_created, oof_shard)

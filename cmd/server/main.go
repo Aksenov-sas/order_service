@@ -52,11 +52,19 @@ func main() {
 
 	// Создание Kafka consumer для обработки новых заказов
 	kafkaConsumer := kafka.NewConsumer(cfg.KafkaBrokers, cfg.KafkaTopic, cfg.KafkaGroupID)
-	defer kafkaConsumer.Close()
+	defer func() {
+		if err := kafkaConsumer.Close(); err != nil {
+			log.Printf("Ошибка при закрытии Kafka consumer: %v", err)
+		}
+	}()
 
 	// Создание Kafka producer для демонстрации поступления новых заказов
 	kafkaProducer := kafka.NewProducer(cfg.KafkaBrokers, cfg.KafkaTopic)
-	defer kafkaProducer.Close()
+	defer func() {
+		if err := kafkaProducer.Close(); err != nil {
+			log.Printf("Ошибка при закрытии Kafka producer: %v", err)
+		}
+	}()
 
 	// Контекст для управления Kafka consumer
 	consumerCtx, cancelConsumer := context.WithCancel(ctx)
@@ -81,7 +89,7 @@ func main() {
 		log.Printf("Начало отправки тестовых заказов в Kafka: %s", cfg.KafkaTopic)
 		ticker := time.NewTicker(5 * time.Second) // Отправляем заказ каждые 5 секунд
 		defer ticker.Stop()
-		
+
 		orderCounter := 1
 		for {
 			select {
@@ -165,12 +173,12 @@ func main() {
 	case <-time.After(10 * time.Second):
 		log.Println("Таймаут ожидания остановки consumer")
 	}
-	
+
 	select {
 	case <-producerDone:
 	case <-time.After(5 * time.Second):
 		log.Println("Таймаут ожидания остановки producer")
 	}
-	
+
 	log.Println("Сервер остановлен успешно")
 }

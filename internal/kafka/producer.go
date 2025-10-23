@@ -1,4 +1,4 @@
-// Пакет kafka содержит логику для работы с Apache Kafka
+// Package kafka содержит логику для работы с Apache Kafka
 package kafka
 
 import (

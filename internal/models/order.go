@@ -1,4 +1,4 @@
-// Пакет models содержит структуры данных для работы с заказами
+// Package models содержит структуры данных для работы с заказами
 package models
 
 import (
@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Экземпляр кастомного валидатора
@@ -98,20 +97,4 @@ type Item struct {
 // Подтверждение отдельного товара.
 func (it *Item) Validate() error {
 	return validate.Struct(it)
-}
-
-// TimeToPgType преобразует time.Time в pgtype.Timestamp для работы с PostgreSQL
-func TimeToPgType(t time.Time) pgtype.Timestamp {
-	return pgtype.Timestamp{
-		Time:  t,
-		Valid: !t.IsZero(),
-	}
-}
-
-// PgTypeToTime преобразует pgtype.Timestamp в time.Time
-func PgTypeToTime(ts pgtype.Timestamp) time.Time {
-	if ts.Valid {
-		return ts.Time
-	}
-	return time.Time{}
 }

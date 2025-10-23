@@ -1,4 +1,4 @@
-// Пакет service содержит бизнес-логику приложения для работы с заказами
+// Package service содержит бизнес-логику приложения для работы с заказами
 package service
 
 import (
@@ -14,32 +14,32 @@ import (
 
 // Service представляет основной сервис для работы с заказами
 type Service struct {
-	db    interfaces.Database      // Подключение к базе данных PostgreSQL
-	cache interfaces.Cache         // Кэш для хранения заказов в памяти
-	mu    sync.RWMutex            // Мьютекс для безопасного доступа к статистике
+	db    interfaces.Database // Подключение к базе данных PostgreSQL
+	cache interfaces.Cache    // Кэш для хранения заказов в памяти
+	mu    sync.RWMutex        // Мьютекс для безопасного доступа к статистике
 	stats struct {
 		LastRequestTime     time.Time     // Время последнего запроса
 		LastRequestDuration time.Duration // Длительность обработки последнего запроса
 	}
-	cleanupTicker *time.Ticker    // Тикер для периодической очистки кэша
-	stopCleanup   chan struct{}   // Канал для остановки очистки
+	cleanupTicker *time.Ticker  // Тикер для периодической очистки кэша
+	stopCleanup   chan struct{} // Канал для остановки очистки
 }
 
 // New создает новый экземпляр сервиса с инициализированным кэшем
 func New(db interfaces.Database) *Service {
 	// Создаем конкретный кэш с TTL
 	concreteCache := cache.New(30 * time.Minute) // Создаем новый кэш с TTL 30 минут
-	
+
 	svc := &Service{
-		db:          db,
-		cache:       concreteCache, // Присваиваем кэш интерфейсному полю (автоматическое преобразование)
+		db:            db,
+		cache:         concreteCache,                    // Присваиваем кэш интерфейсному полю (автоматическое преобразование)
 		cleanupTicker: time.NewTicker(10 * time.Minute), // Очистка каждые 10 минут
-		stopCleanup:   make(chan struct{}),            // Канал для остановки очистки
+		stopCleanup:   make(chan struct{}),              // Канал для остановки очистки
 	}
-	
+
 	// Запуск фоновой задачи по очистке кэша
 	go svc.runCleanup()
-	
+
 	return svc
 }
 
@@ -49,12 +49,12 @@ func NewWithCache(db interfaces.Database, cache interfaces.Cache) *Service {
 		db:            db,
 		cache:         cache,
 		cleanupTicker: time.NewTicker(10 * time.Minute), // Очистка каждые 10 минут
-		stopCleanup:   make(chan struct{}),            // Канал для остановки очистки
+		stopCleanup:   make(chan struct{}),              // Канал для остановки очистки
 	}
-	
+
 	// Запуск фоновой задачи по очистке кэша
 	go svc.runCleanup()
-	
+
 	return svc
 }
 
@@ -166,6 +166,6 @@ func (s *Service) Close() {
 	// Останавливаем тикер очистки
 	s.cleanupTicker.Stop()
 	close(s.stopCleanup) // Останавливаем фоновую задачу
-	
+
 	s.db.Close()
 }

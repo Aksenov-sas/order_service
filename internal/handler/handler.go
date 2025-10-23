@@ -1,4 +1,4 @@
-// Пакет handler содержит HTTP обработчики для API
+// Package handler содержит HTTP обработчики для API
 package handler
 
 import (
@@ -44,21 +44,27 @@ func (h *Handler) GetOrder(w http.ResponseWriter, r *http.Request) {
 
 	// Возвращаем заказ в формате JSON
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(order)
+	if err := json.NewEncoder(w).Encode(order); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 // HealthCheck обрабатывает запрос проверки состояния сервиса
 func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":    "healthy",        // Статус сервиса
 		"timestamp": time.Now().UTC(), // Текущее время
-	})
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 // Stats обрабатывает запрос для получения статистики сервиса
 func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	stats := h.service.GetCacheStats() // Получаем статистику от сервиса
-	json.NewEncoder(w).Encode(stats)   // Возвращаем статистику в формате JSON
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	} // Возвращаем статистику в формате JSON
 }
