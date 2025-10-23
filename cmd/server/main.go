@@ -54,6 +54,10 @@ func main() {
 	kafkaConsumer := kafka.NewConsumer(cfg.KafkaBrokers, cfg.KafkaTopic, cfg.KafkaGroupID)
 	defer kafkaConsumer.Close()
 
+	// Создание Kafka producer для демонстрации поступления новых заказов
+	kafkaProducer := kafka.NewProducer(cfg.KafkaBrokers, cfg.KafkaTopic)
+	defer kafkaProducer.Close()
+
 	// Контекст для управления Kafka consumer
 	consumerCtx, cancelConsumer := context.WithCancel(ctx)
 	defer cancelConsumer()
@@ -66,6 +70,34 @@ func main() {
 			log.Printf("Ошибка работы в Kafka consumer: %v", err)
 		}
 		close(consumerDone)
+	}()
+
+	// Запуск Kafka producer в отдельной горутине для демонстрации поступления заказов
+	producerCtx, cancelProducer := context.WithCancel(ctx)
+	defer cancelProducer()
+
+	producerDone := make(chan struct{})
+	go func() {
+		log.Printf("Начало отправки тестовых заказов в Kafka: %s", cfg.KafkaTopic)
+		ticker := time.NewTicker(5 * time.Second) // Отправляем заказ каждые 5 секунд
+		defer ticker.Stop()
+		
+		orderCounter := 1
+		for {
+			select {
+			case <-producerCtx.Done():
+				close(producerDone)
+				return
+			case <-ticker.C:
+				order := kafka.GenerateTestOrder(orderCounter)
+				if err := kafkaProducer.SendOrderWithContext(producerCtx, order); err != nil {
+					log.Printf("Ошибка отправки тестового заказа: %v", err)
+				} else {
+					log.Printf("Отправлен тестовый заказ в Kafka: %s", order.OrderUID)
+				}
+				orderCounter++
+			}
+		}
 	}()
 
 	// Создание HTTP обработчиков
@@ -126,11 +158,19 @@ func main() {
 		log.Printf("ошибка:%v", err)
 	}
 	cancelConsumer()
-	// Дожидаемся завершения consumer
+	cancelProducer()
+	// Дожидаемся завершения consumer и producer
 	select {
 	case <-consumerDone:
 	case <-time.After(10 * time.Second):
 		log.Println("Таймаут ожидания остановки consumer")
 	}
+	
+	select {
+	case <-producerDone:
+	case <-time.After(5 * time.Second):
+		log.Println("Таймаут ожидания остановки producer")
+	}
+	
 	log.Println("Сервер остановлен успешно")
 }
