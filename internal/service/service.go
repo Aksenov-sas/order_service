@@ -21,14 +21,22 @@ type Service struct {
 		LastRequestTime     time.Time     // Время последнего запроса
 		LastRequestDuration time.Duration // Длительность обработки последнего запроса
 	}
+	cleanupTicker *time.Ticker    // Тикер для периодической очистки кэша
+	stopCleanup   chan struct{}   // Канал для остановки очистки
 }
 
 // New создает новый экземпляр сервиса с инициализированным кэшем
 func New(db *database.Postgres) *Service {
 	svc := &Service{
-		db:    db,
-		cache: cache.New(), // Создаем новый кэш
+		db:          db,
+		cache:       cache.New(30 * time.Minute), // Создаем новый кэш с TTL 30 минут
+		cleanupTicker: time.NewTicker(10 * time.Minute), // Очистка каждые 10 минут
+		stopCleanup:   make(chan struct{}),            // Канал для остановки очистки
 	}
+	
+	// Запуск фоновой задачи по очистке кэша
+	go svc.runCleanup()
+	
 	return svc
 }
 
@@ -123,7 +131,23 @@ func (s *Service) GetCacheStats() map[string]interface{} {
 	}
 }
 
-// Close закрывает соединение с базой данных
+// runCleanup запускает фоновую задачу по очистке кэша
+func (s *Service) runCleanup() {
+	for {
+		select {
+		case <-s.cleanupTicker.C:
+			s.cache.Cleanup() // Очищаем истекшие элементы
+		case <-s.stopCleanup:
+			return
+		}
+	}
+}
+
+// Close закрывает соединение с базой данных и останавливает очистку кэша
 func (s *Service) Close() {
+	// Останавливаем тикер очистки
+	s.cleanupTicker.Stop()
+	close(s.stopCleanup) // Останавливаем фоновую задачу
+	
 	s.db.Close()
 }
