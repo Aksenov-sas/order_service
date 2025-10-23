@@ -8,15 +8,15 @@ import (
 	"time"
 
 	"test_service/internal/cache"
-	"test_service/internal/database"
+	"test_service/internal/interfaces"
 	"test_service/internal/models"
 )
 
 // Service представляет основной сервис для работы с заказами
 type Service struct {
-	db    *database.Postgres // Подключение к базе данных PostgreSQL
-	cache *cache.Cache       // Кэш для хранения заказов в памяти
-	mu    sync.RWMutex       // Мьютекс для безопасного доступа к статистике
+	db    interfaces.Database      // Подключение к базе данных PostgreSQL
+	cache interfaces.Cache         // Кэш для хранения заказов в памяти
+	mu    sync.RWMutex            // Мьютекс для безопасного доступа к статистике
 	stats struct {
 		LastRequestTime     time.Time     // Время последнего запроса
 		LastRequestDuration time.Duration // Длительность обработки последнего запроса
@@ -26,10 +26,28 @@ type Service struct {
 }
 
 // New создает новый экземпляр сервиса с инициализированным кэшем
-func New(db *database.Postgres) *Service {
+func New(db interfaces.Database) *Service {
+	// Создаем конкретный кэш с TTL
+	concreteCache := cache.New(30 * time.Minute) // Создаем новый кэш с TTL 30 минут
+	
 	svc := &Service{
 		db:          db,
-		cache:       cache.New(30 * time.Minute), // Создаем новый кэш с TTL 30 минут
+		cache:       concreteCache, // Присваиваем кэш интерфейсному полю (автоматическое преобразование)
+		cleanupTicker: time.NewTicker(10 * time.Minute), // Очистка каждые 10 минут
+		stopCleanup:   make(chan struct{}),            // Канал для остановки очистки
+	}
+	
+	// Запуск фоновой задачи по очистке кэша
+	go svc.runCleanup()
+	
+	return svc
+}
+
+// NewWithCache создает новый экземпляр сервиса с предоставленным кэшем
+func NewWithCache(db interfaces.Database, cache interfaces.Cache) *Service {
+	svc := &Service{
+		db:            db,
+		cache:         cache,
 		cleanupTicker: time.NewTicker(10 * time.Minute), // Очистка каждые 10 минут
 		stopCleanup:   make(chan struct{}),            // Канал для остановки очистки
 	}
