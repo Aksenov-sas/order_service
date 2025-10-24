@@ -14,7 +14,9 @@ import (
 
 // Consumer для обработки сообщений
 type Consumer struct {
-	reader *kafka.Reader // Kafka reader для чтения сообщений
+	reader   *kafka.Reader // Kafka reader для чтения сообщений
+	dlq      *DLQProducer  // DLQ producer для отправки неудачных сообщений
+	maxRetry int           // Максимальное количество попыток обработки
 }
 
 // NewConsumer создает новый Kafka consumer
@@ -26,7 +28,30 @@ func NewConsumer(brokers []string, topic string, groupID string) *Consumer {
 		Topic:          topic,       // Топик для чтения
 		CommitInterval: time.Second, // Интервал коммита сообщений
 	})
-	return &Consumer{reader: reader}
+	return &Consumer{
+		reader:   reader,
+		maxRetry: 3, // Максимальное количество попыток
+	}
+}
+
+// NewConsumerWithDLQ создает новый Kafka consumer с DLQ
+func NewConsumerWithDLQ(brokers []string, topic string, groupID string, dlqProducer *DLQProducer) *Consumer {
+	reader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:        brokers,     // Список брокеров Kafka
+		GroupID:        groupID,     // ID группы потребителей
+		Topic:          topic,       // Топик для чтения
+		CommitInterval: time.Second, // Интервал коммита сообщений
+	})
+	return &Consumer{
+		reader:   reader,
+		dlq:      dlqProducer,
+		maxRetry: 3, // Максимальное количество попыток по умолчанию
+	}
+}
+
+// SetMaxRetry устанавливает максимальное количество попыток обработки
+func (c *Consumer) SetMaxRetry(maxRetry int) {
+	c.maxRetry = maxRetry
 }
 
 // Consume запускает бесконечный цикл обработки сообщений из Kafka
@@ -54,7 +79,20 @@ func (c *Consumer) Consume(ctx context.Context, processFunc func(*models.Order) 
 			var order models.Order
 			if err := json.Unmarshal(msg.Value, &order); err != nil {
 				log.Printf("Ошибка дешифровки сообщения: %v", err)
-				// Сообщение невалидно как JSON — подтверждаем, чтобы не зациклиться
+				// Отправляем сообщение в DLQ, если DLQ настроена
+				if c.dlq != nil {
+					dlqMsg := kafka.Message{
+						Topic: c.reader.Config().Topic,
+						Key:   msg.Key,
+						Value: msg.Value,
+					}
+					if dlqErr := c.dlq.SendToDLQ(dlqMsg, err, 1); dlqErr != nil {
+						log.Printf("Ошибка отправки в DLQ: %v", dlqErr)
+					} else {
+						log.Printf("Сообщение отправлено в DLQ из-за ошибки JSON: %s", order.OrderUID)
+					}
+				}
+				// Подтверждаем сообщение, чтобы не зациклиться
 				if err := c.reader.CommitMessages(ctx, msg); err != nil {
 					log.Printf("Ошибка commit невалидного сообщения: %v", err)
 				}
@@ -64,7 +102,20 @@ func (c *Consumer) Consume(ctx context.Context, processFunc func(*models.Order) 
 			// Валидация полезной нагрузки
 			if err := order.Validate(); err != nil {
 				log.Printf("Невалидный заказ %v: %v", order.OrderUID, err)
-				// Пропускаем сообщение и коммитим, чтобы не зациклиться
+				// Отправляем сообщение в DLQ
+				if c.dlq != nil {
+					dlqMsg := kafka.Message{
+						Topic: c.reader.Config().Topic,
+						Key:   msg.Key,
+						Value: msg.Value,
+					}
+					if dlqErr := c.dlq.SendToDLQ(dlqMsg, err, 1); dlqErr != nil {
+						log.Printf("Ошибка отправки в DLQ: %v", dlqErr)
+					} else {
+						log.Printf("Сообщение отправлено в DLQ из-за ошибки валидации: %s", order.OrderUID)
+					}
+				}
+				// Подтверждаем сообщение, чтобы не зациклиться
 				if err := c.reader.CommitMessages(ctx, msg); err != nil {
 					log.Printf("Ошибка commit невалидного сообщения: %v", err)
 				}
@@ -74,6 +125,23 @@ func (c *Consumer) Consume(ctx context.Context, processFunc func(*models.Order) 
 			// Обрабатываем заказ через переданную функцию
 			if err := processFunc(&order); err != nil {
 				log.Printf("Ошибка обработки заказа %s: %v", order.OrderUID, err)
+				// Отправляем сообщение в DLQ
+				if c.dlq != nil {
+					dlqMsg := kafka.Message{
+						Topic: c.reader.Config().Topic,
+						Key:   msg.Key,
+						Value: msg.Value,
+					}
+					if dlqErr := c.dlq.SendToDLQ(dlqMsg, err, 1); dlqErr != nil {
+						log.Printf("Ошибка отправки в DLQ: %v", dlqErr)
+					} else {
+						log.Printf("Сообщение отправлено в DLQ из-за ошибки обработки: %s", order.OrderUID)
+					}
+				}
+				// Подтверждаем сообщение, чтобы не зациклиться
+				if err := c.reader.CommitMessages(ctx, msg); err != nil {
+					log.Printf("Ошибка commit сообщения: %v", err)
+				}
 				continue
 			}
 
