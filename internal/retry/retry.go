@@ -129,13 +129,3 @@ func DoWithContext(ctx context.Context, policy Policy, fn ContextRetryableFunc) 
 
 	return lastErr
 }
-
-// IsRetryableError проверяет, является ли ошибка повторяемой
-func IsRetryableError(err error) bool {
-	// В реальной системе здесь можно было бы проверять конкретные типы ошибок
-	// Например, сетевые ошибки, таймауты, временные ошибки БД и т.д.
-
-	// Для простоты считаем, что любая ошибка может быть повторяемой
-	// В production системе следует реализовать более точную проверку
-	return err != nil
-}
