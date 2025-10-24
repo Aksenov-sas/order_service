@@ -16,6 +16,7 @@ import (
 	"test_service/internal/database"
 	"test_service/internal/handler"
 	"test_service/internal/kafka"
+	"test_service/internal/retry"
 	"test_service/internal/service"
 )
 
@@ -29,25 +30,50 @@ func main() {
 		log.Fatalf("Ошибка загрузки конфигурации: %v", err)
 	}
 
-	// Подключение к базе данных
+	// Подключение к базе данных с retry
 	log.Println("Подключение к БД...")
-	db, err := database.NewPostgres(ctx, cfg.PostgresDSN)
+	var db *database.Postgres
+	err = retry.DoWithContext(ctx, retry.HeavyPolicy(), func(ctx context.Context) error {
+		var dbErr error
+		db, dbErr = database.NewPostgres(ctx, cfg.PostgresDSN)
+		if dbErr != nil {
+			log.Printf("Ошибка подключения к БД (попытка будет повторена): %v", dbErr)
+			return dbErr
+		}
+		return nil
+	})
 	if err != nil {
-		log.Fatalf("Ошибка подключения к БД: %v", err)
+		log.Fatalf("Ошибка подключения к БД после всех попыток: %v", err)
 	}
 	defer db.Close()
 
-	// Инициализация базы данных (создание таблиц)
-	if err := db.Init(ctx); err != nil {
-		log.Fatalf("Ошибка инициализации БД: %v", err)
+	// Инициализация базы данных (создание таблиц) с retry
+	err = retry.DoWithContext(ctx, retry.HeavyPolicy(), func(ctx context.Context) error {
+		err := db.Init(ctx)
+		if err != nil {
+			log.Printf("Ошибка инициализации БД (попытка будет повторена): %v", err)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatalf("Ошибка инициализации БД после всех попыток: %v", err)
 	}
 
 	// Создание сервиса для работы с заказами
 	svc := service.New(db)
 
-	// Прогрев кэша перед запуском обработчиков
-	if err := svc.WarmUpCache(ctx); err != nil {
-		log.Printf("Ошибка прогрева кэша: %v", err)
+	// Прогрев кэша перед запуском обработчиков с retry
+	err = retry.DoWithContext(ctx, retry.DefaultPolicy(), func(ctx context.Context) error {
+		err := svc.WarmUpCache(ctx)
+		if err != nil {
+			log.Printf("Ошибка прогрева кэша (попытка будет повторена): %v", err)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("Ошибка прогрева кэша после всех попыток: %v", err)
 	}
 
 	// Создание DLQ producer для обработки неудачных сообщений
