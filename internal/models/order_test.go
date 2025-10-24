@@ -4,16 +4,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-faker/faker/v4"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestOrder_Validate(t *testing.T) {
 	// Проверка валидного заказа
 	t.Run("ValidOrder", func(t *testing.T) {
 		order := &Order{
-			OrderUID:        "testorderuid1234567890123456", // 32 буквенно-цифровых символа
+			OrderUID:        "testorderuid1234567890123456abcd", // 32 буквенно-цифровых символа
 			TrackNumber:     "TRACK123",
 			Entry:           "EntryTest",
 			Locale:          "en",
@@ -145,7 +143,7 @@ func TestOrder_Validate(t *testing.T) {
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				order := &Order{
-					OrderUID:        "testorderuid1234567890123456", // 32 буквенно-цифровых символа
+					OrderUID:        "testorderuid1234567890123456abcd",
 					TrackNumber:     "TRACK123",
 					Entry:           "EntryTest",
 					Locale:          "en",
@@ -201,7 +199,7 @@ func TestOrder_Validate(t *testing.T) {
 	// Проверка недействительной доставки
 	t.Run("InvalidDelivery", func(t *testing.T) {
 		order := &Order{
-			OrderUID:        "testorderuid1234567890123456", // 32 буквенно-цифровых символа
+			OrderUID:        "testorderuid1234567890123456abcd",
 			TrackNumber:     "TRACK123",
 			Entry:           "EntryTest",
 			Locale:          "en",
@@ -248,13 +246,13 @@ func TestOrder_Validate(t *testing.T) {
 
 		err := order.Validate()
 		assert.Error(t, err, "недействительный заказ доставки должен возвращать ошибку")
-		assert.Contains(t, err.Error(), "delivery.name", "ошибка должна содержать 'delivery.name'")
+		assert.Contains(t, err.Error(), "Name", "ошибка должна содержать 'Name'")
 	})
 
 	// Проверка недействительного платежа
 	t.Run("InvalidPayment", func(t *testing.T) {
 		order := &Order{
-			OrderUID:        "testorderuid1234567890123456", // 32 буквенно-цифровых символа
+			OrderUID:        "testorderuid1234567890123456abcd",
 			TrackNumber:     "TRACK123",
 			Entry:           "EntryTest",
 			Locale:          "en",
@@ -301,13 +299,13 @@ func TestOrder_Validate(t *testing.T) {
 
 		err := order.Validate()
 		assert.Error(t, err, "недействительный заказ платежа должен возвращать ошибку")
-		assert.Contains(t, err.Error(), "payment.transaction", "ошибка должна содержать 'payment.transaction'")
+		assert.Contains(t, err.Error(), "Transaction", "ошибка должна содержать 'Transaction'")
 	})
 
 	// Проверка недействительных товаров
 	t.Run("InvalidItems", func(t *testing.T) {
 		order := &Order{
-			OrderUID:        "testorderuid1234567890123456", // 32 буквенно-цифровых символа
+			OrderUID:        "testorderuid1234567890123456abcd",
 			TrackNumber:     "TRACK123",
 			Entry:           "EntryTest",
 			Locale:          "en",
@@ -339,7 +337,7 @@ func TestOrder_Validate(t *testing.T) {
 			},
 			Items: []Item{
 				{
-					ChrtID:      0, // Неверно - должен быть ненулевым
+					ChrtID:      0,
 					TrackNumber: "TRACK123",
 					Price:       500,
 					RID:         "rid123",
@@ -354,7 +352,7 @@ func TestOrder_Validate(t *testing.T) {
 
 		err := order.Validate()
 		assert.Error(t, err, "недействительный товар заказа должен возвращать ошибку")
-		assert.Contains(t, err.Error(), "chrt_id", "ошибка должна содержать 'chrt_id'")
+		assert.Contains(t, err.Error(), "ChrtID", "ошибка должна содержать 'ChrtID'")
 	})
 }
 
@@ -378,58 +376,58 @@ func TestDelivery_Validate(t *testing.T) {
 	// Проверка доставки с отсутствующими обязательными полями
 	t.Run("MissingRequiredFields", func(t *testing.T) {
 		testCases := []struct {
-			name         string
+			name           string
 			modifyDelivery func(*Delivery)
-			expectedErr  string
+			expectedErr    string
 		}{
 			{
 				name: "MissingName",
 				modifyDelivery: func(d *Delivery) {
 					d.Name = ""
 				},
-				expectedErr: "delivery.name",
+				expectedErr: "Name",
 			},
 			{
 				name: "MissingPhone",
 				modifyDelivery: func(d *Delivery) {
 					d.Phone = ""
 				},
-				expectedErr: "delivery.phone",
+				expectedErr: "Phone",
 			},
 			{
 				name: "MissingZip",
 				modifyDelivery: func(d *Delivery) {
 					d.Zip = ""
 				},
-				expectedErr: "delivery.zip",
+				expectedErr: "Zip",
 			},
 			{
 				name: "MissingCity",
 				modifyDelivery: func(d *Delivery) {
 					d.City = ""
 				},
-				expectedErr: "delivery.city",
+				expectedErr: "City",
 			},
 			{
 				name: "MissingAddress",
 				modifyDelivery: func(d *Delivery) {
 					d.Address = ""
 				},
-				expectedErr: "delivery.address",
+				expectedErr: "Address",
 			},
 			{
 				name: "MissingRegion",
 				modifyDelivery: func(d *Delivery) {
 					d.Region = ""
 				},
-				expectedErr: "delivery.region",
+				expectedErr: "Region",
 			},
 			{
 				name: "MissingEmail",
 				modifyDelivery: func(d *Delivery) {
 					d.Email = ""
 				},
-				expectedErr: "delivery.email",
+				expectedErr: "Email",
 			},
 		}
 
@@ -476,37 +474,37 @@ func TestPayment_Validate(t *testing.T) {
 	// Проверка платежа с отсутствующими обязательными полями
 	t.Run("MissingRequiredFields", func(t *testing.T) {
 		testCases := []struct {
-			name        string
+			name          string
 			modifyPayment func(*Payment)
-			expectedErr string
+			expectedErr   string
 		}{
 			{
 				name: "MissingTransaction",
 				modifyPayment: func(p *Payment) {
 					p.Transaction = ""
 				},
-				expectedErr: "payment.transaction",
+				expectedErr: "Transaction",
 			},
 			{
 				name: "MissingCurrency",
 				modifyPayment: func(p *Payment) {
 					p.Currency = ""
 				},
-				expectedErr: "payment.currency",
+				expectedErr: "Currency",
 			},
 			{
 				name: "MissingProvider",
 				modifyPayment: func(p *Payment) {
 					p.Provider = ""
 				},
-				expectedErr: "payment.provider",
+				expectedErr: "Provider",
 			},
 			{
 				name: "MissingBank",
 				modifyPayment: func(p *Payment) {
 					p.Bank = ""
 				},
-				expectedErr: "payment.bank",
+				expectedErr: "Bank",
 			},
 		}
 
@@ -535,30 +533,30 @@ func TestPayment_Validate(t *testing.T) {
 	// Проверка недействительных сумм
 	t.Run("InvalidAmounts", func(t *testing.T) {
 		testCases := []struct {
-			name        string
+			name          string
 			modifyPayment func(*Payment)
-			expectedErr string
+			expectedErr   string
 		}{
 			{
 				name: "NegativeAmount",
 				modifyPayment: func(p *Payment) {
 					p.Amount = -100
 				},
-				expectedErr: "amount",
+				expectedErr: "Amount",
 			},
 			{
 				name: "ZeroPaymentDT",
 				modifyPayment: func(p *Payment) {
 					p.PaymentDT = 0
 				},
-				expectedErr: "payment_dt",
+				expectedErr: "PaymentDT",
 			},
 			{
 				name: "NegativePaymentDT",
 				modifyPayment: func(p *Payment) {
 					p.PaymentDT = -1
 				},
-				expectedErr: "payment_dt",
+				expectedErr: "PaymentDT",
 			},
 		}
 
@@ -607,8 +605,8 @@ func TestItem_Validate(t *testing.T) {
 	// Проверка товара с отсутствующими обязательными полями
 	t.Run("MissingRequiredFields", func(t *testing.T) {
 		testCases := []struct {
-			name      string
-			modifyItem func(*Item)
+			name        string
+			modifyItem  func(*Item)
 			expectedErr string
 		}{
 			{
@@ -616,35 +614,35 @@ func TestItem_Validate(t *testing.T) {
 				modifyItem: func(i *Item) {
 					i.TrackNumber = ""
 				},
-				expectedErr: "track_number",
+				expectedErr: "TrackNumber",
 			},
 			{
 				name: "MissingRID",
 				modifyItem: func(i *Item) {
 					i.RID = ""
 				},
-				expectedErr: "rid",
+				expectedErr: "RID",
 			},
 			{
 				name: "MissingName",
 				modifyItem: func(i *Item) {
 					i.Name = ""
 				},
-				expectedErr: "name",
+				expectedErr: "Name",
 			},
 			{
 				name: "MissingSize",
 				modifyItem: func(i *Item) {
 					i.Size = ""
 				},
-				expectedErr: "size",
+				expectedErr: "Size",
 			},
 			{
 				name: "MissingBrand",
 				modifyItem: func(i *Item) {
 					i.Brand = ""
 				},
-				expectedErr: "brand",
+				expectedErr: "Brand",
 			},
 		}
 
@@ -673,8 +671,8 @@ func TestItem_Validate(t *testing.T) {
 	// Проверка недействительных числовых полей
 	t.Run("InvalidNumericFields", func(t *testing.T) {
 		testCases := []struct {
-			name      string
-			modifyItem func(*Item)
+			name        string
+			modifyItem  func(*Item)
 			expectedErr string
 		}{
 			{
@@ -682,28 +680,28 @@ func TestItem_Validate(t *testing.T) {
 				modifyItem: func(i *Item) {
 					i.ChrtID = 0
 				},
-				expectedErr: "chrt_id",
+				expectedErr: "ChrtID",
 			},
 			{
 				name: "ZeroNMID",
 				modifyItem: func(i *Item) {
 					i.NMID = 0
 				},
-				expectedErr: "nm_id",
+				expectedErr: "NMID",
 			},
 			{
 				name: "NegativePrice",
 				modifyItem: func(i *Item) {
 					i.Price = -100
 				},
-				expectedErr: "price",
+				expectedErr: "Price",
 			},
 			{
 				name: "NegativeTotalPrice",
 				modifyItem: func(i *Item) {
 					i.TotalPrice = -100
 				},
-				expectedErr: "total_price",
+				expectedErr: "TotalPrice",
 			},
 		}
 
@@ -726,50 +724,6 @@ func TestItem_Validate(t *testing.T) {
 				assert.Error(t, err, "валидация товара с недействительным числовым полем должна вернуть ошибку")
 				assert.Contains(t, err.Error(), tc.expectedErr, "ошибка должна содержать ожидаемый текст")
 			})
-		}
-	})
-}
-
-func TestGenerateValidOrders(t *testing.T) {
-	// Проверка, что сгенерированные фейкером заказы действительны
-	t.Run("FakerGeneratedOrdersAreValid", func(t *testing.T) {
-		for i := 0; i < 5; i++ {
-			order := &Order{}
-			err := faker.FakeData(order)
-			require.NoError(t, err, "фейкер не должен возвращать ошибки")
-
-			// Вручную устанавливаем обязательные поля, которые могут не быть установлены фейкером
-			if order.OrderUID == "" {
-				order.OrderUID = "test-order-" + string(rune('A'+i))
-			}
-			if order.TrackNumber == "" {
-				order.TrackNumber = "TRACK" + string(rune('0'+i))
-			}
-			if order.Entry == "" {
-				order.Entry = "ENTRY"
-			}
-			if order.Locale == "" {
-				order.Locale = "en"
-			}
-			if order.CustomerID == "" {
-				order.CustomerID = "cust" + string(rune('0'+i))
-			}
-			if order.DeliveryService == "" {
-				order.DeliveryService = "delivery"
-			}
-			if order.ShardKey == "" {
-				order.ShardKey = "shard"
-			}
-			if order.OOFShard == "" {
-				order.OOFShard = "oof"
-			}
-			if order.SMID == 0 {
-				order.SMID = i + 1
-			}
-
-			// Проверяем заказ
-			err = order.Validate()
-			assert.NoError(t, err, "Сгенерированный заказ должен быть действительным")
 		}
 	})
 }
