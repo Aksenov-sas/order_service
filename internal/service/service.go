@@ -10,6 +10,7 @@ import (
 	"test_service/internal/cache"
 	"test_service/internal/interfaces"
 	"test_service/internal/models"
+	"test_service/internal/retry"
 )
 
 // Service представляет основной сервис для работы с заказами
@@ -81,8 +82,15 @@ func (s *Service) ProcessOrder(order *models.Order) error {
 		order.DateCreated = time.Now()
 	}
 
-	// Сохраняем заказ в базу данных
-	if err := s.db.SaveOrder(ctx, order); err != nil {
+	// Используем retry механизм для операции сохранения в БД
+	retryPolicy := retry.HeavyPolicy() // Используем тяжелую политику для критических операций
+	
+	err := retry.DoWithContext(ctx, retryPolicy, func(ctx context.Context) error {
+		// Сохраняем заказ в базу данных
+		return s.db.SaveOrder(ctx, order)
+	})
+	
+	if err != nil {
 		return err
 	}
 
