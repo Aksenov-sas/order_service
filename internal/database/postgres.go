@@ -3,9 +3,11 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"test_service/internal/models"
+	"test_service/internal/retry"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,307 +42,273 @@ func NewPostgres(ctx context.Context, connectStr string) (*Postgres, error) {
 
 // Init инициализирует базу данных, создавая необходимые таблицы и индексы
 func (p *Postgres) Init(ctx context.Context) error {
-	// SQL запросы для создания таблиц и индексов
-	queries := []string{
-		// Таблица заказов
-		`CREATE TABLE IF NOT EXISTS orders (
-			order_uid VARCHAR(255) PRIMARY KEY,
-			track_number VARCHAR(255),
-			entry VARCHAR(255),
-			locale VARCHAR(10),
-			internal_signature VARCHAR(255),
-			customer_id VARCHAR(255),
-			delivery_service VARCHAR(255),
-			shardkey VARCHAR(255),
-			sm_id INTEGER,
-			date_created TIMESTAMP,
-			oof_shard VARCHAR(255)
-		)`,
+	var err error
+	
+	// Используем retry механизм для инициализации базы данных
+	retryPolicy := retry.HeavyPolicy() // Используем тяжелую политику для критических операций инициализации
+	
+	err = retry.DoWithContext(ctx, retryPolicy, func(ctx context.Context) error {
+		// SQL запросы для создания таблиц и индексов
+		queries := []string{
+			// Таблица заказов
+			CreateOrdersTable,
 
-		// Таблица доставки
-		`CREATE TABLE IF NOT EXISTS delivery (
-			order_uid VARCHAR(255) PRIMARY KEY REFERENCES orders(order_uid) ON DELETE CASCADE,
-			name VARCHAR(255),
-			phone VARCHAR(255),
-			zip VARCHAR(255),
-			city VARCHAR(255),
-			address VARCHAR(255),
-			region VARCHAR(255),
-			email VARCHAR(255)
-		)`,
+			// Таблица доставки
+			CreateDeliveryTable,
 
-		// Таблица платежей
-		`CREATE TABLE IF NOT EXISTS payment (
-			order_uid VARCHAR(255) PRIMARY KEY REFERENCES orders(order_uid) ON DELETE CASCADE,
-			transaction VARCHAR(255),
-			request_id VARCHAR(255),
-			currency VARCHAR(10),
-			provider VARCHAR(255),
-			amount INTEGER,
-			payment_dt BIGINT,
-			bank VARCHAR(255),
-			delivery_cost INTEGER,
-			goods_total INTEGER,
-			custom_fee INTEGER
-		)`,
+			// Таблица платежей
+			CreatePaymentTable,
 
-		// Таблица товаров
-		`CREATE TABLE IF NOT EXISTS items (
-			id SERIAL PRIMARY KEY,
-			order_uid VARCHAR(255) REFERENCES orders(order_uid) ON DELETE CASCADE,
-			chrt_id INTEGER,
-			track_number VARCHAR(255),
-			price INTEGER,
-			rid VARCHAR(255),
-			name VARCHAR(255),
-			sale INTEGER,
-			size VARCHAR(255),
-			total_price INTEGER,
-			nm_id INTEGER,
-			brand VARCHAR(255),
-			status INTEGER
-		)`,
+			// Таблица товаров
+			CreateItemsTable,
 
-		// Индексы для оптимизации запросов
-		`CREATE INDEX IF NOT EXISTS idx_items_order_uid ON items(order_uid)`,
-		`CREATE INDEX IF NOT EXISTS idx_orders_date_created ON orders(date_created)`,
-	}
-
-	// Выполняем все SQL запросы
-	for _, query := range queries {
-		_, err := p.pool.Exec(ctx, query)
-		if err != nil {
-			return fmt.Errorf("Ошибка выполнения запроса %s: %v", query, err)
+			// Индексы для оптимизации запросов
+			CreateItemsIndex,
+			`CREATE INDEX IF NOT EXISTS idx_orders_date_created ON orders(date_created)`,
 		}
-	}
 
-	// Простейшая миграционная таблица для детерминированных миграций
-	if _, err := p.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT NOW())`); err != nil {
-		return fmt.Errorf("Ошибка создания schema_migrations: %v", err)
-	}
+		// Выполняем все SQL запросы
+		for _, query := range queries {
+			_, err := p.pool.Exec(ctx, query)
+			if err != nil {
+				return fmt.Errorf("Ошибка выполнения запроса %s: %v", query, err)
+			}
+		}
 
-	type migration struct{ id, sql string }
-	migrations := []migration{}
-	for _, m := range migrations {
-		var exists bool
-		err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE id=$1)`, m.id).Scan(&exists)
-		if err != nil {
-			return fmt.Errorf("Ошибка проверки миграции %s: %v", m.id, err)
+		// Простейшая миграционная таблица для детерминированных миграций
+		if _, err := p.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT NOW())`); err != nil {
+			return fmt.Errorf("Ошибка создания schema_migrations: %v", err)
 		}
-		if exists {
-			continue
-		}
-		if _, err := p.pool.Exec(ctx, m.sql); err != nil {
-			return fmt.Errorf("Ошибка применения миграции %s: %v", m.id, err)
-		}
-		if _, err := p.pool.Exec(ctx, `INSERT INTO schema_migrations (id) VALUES ($1)`, m.id); err != nil {
-			return fmt.Errorf("Ошибка записи миграции %s: %v", m.id, err)
-		}
-		log.Printf("Применена миграция: %s", m.id)
-	}
 
-	log.Println("БД инициализирована")
-	return nil
+		type migration struct{ id, sql string }
+		migrations := []migration{}
+		for _, m := range migrations {
+			var exists bool
+			err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE id=$1)`, m.id).Scan(&exists)
+			if err != nil {
+				return fmt.Errorf("Ошибка проверки миграции %s: %v", m.id, err)
+			}
+			if exists {
+				continue
+			}
+			if _, err := p.pool.Exec(ctx, m.sql); err != nil {
+				return fmt.Errorf("Ошибка применения миграции %s: %v", m.id, err)
+			}
+			if _, err := p.pool.Exec(ctx, `INSERT INTO schema_migrations (id) VALUES ($1)`, m.id); err != nil {
+				return fmt.Errorf("Ошибка записи миграции %s: %v", m.id, err)
+			}
+			log.Printf("Применена миграция: %s", m.id)
+		}
+
+		log.Println("БД инициализирована")
+		return nil
+	})
+	
+	return err
 }
 
 // SaveOrder сохраняет заказ в базу данных в рамках транзакции
 func (p *Postgres) SaveOrder(ctx context.Context, order *models.Order) error {
-	// Начинаем транзакцию
-	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return fmt.Errorf("Ошибка начала транзакции: %v", err)
-	}
-	defer func() {
-		if err := tx.Rollback(ctx); err != nil {
-			log.Printf("Ошибка при откате транзакции: %v", err)
-		} // Откатываем транзакцию в случае ошибки
-	}()
-	// Сохраняем основную информацию о заказе (UPSERT)
-	_, err = tx.Exec(ctx, `INSERT INTO orders (order_uid, track_number, entry, locale, internal_signature, 
-			customer_id, delivery_service, shardkey, sm_id, date_created, oof_shard)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		ON CONFLICT (order_uid) DO UPDATE SET
-			track_number = EXCLUDED.track_number,
-			entry = EXCLUDED.entry,
-			locale = EXCLUDED.locale,
-			internal_signature = EXCLUDED.internal_signature,
-			customer_id = EXCLUDED.customer_id,
-			delivery_service = EXCLUDED.delivery_service,
-			shardkey = EXCLUDED.shardkey,
-			sm_id = EXCLUDED.sm_id,
-			date_created = EXCLUDED.date_created,
-			oof_shard = EXCLUDED.oof_shard
-	`, order.OrderUID, order.TrackNumber, order.Entry, order.Locale, order.InternalSignature,
-		order.CustomerID, order.DeliveryService, order.ShardKey, order.SMID, order.DateCreated, order.OOFShard)
-	if err != nil {
-		return fmt.Errorf("Ошибка при записи заказа: %v", err)
-	}
+	var err error
 
-	// Сохраняем информацию о доставке (UPSERT)
-	_, err = tx.Exec(ctx, `
-		INSERT INTO delivery (order_uid, name, phone, zip, city, address, region, email)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (order_uid) DO UPDATE SET
-			name = EXCLUDED.name,
-			phone = EXCLUDED.phone,
-			zip = EXCLUDED.zip,
-			city = EXCLUDED.city,
-			address = EXCLUDED.address,
-			region = EXCLUDED.region,
-			email = EXCLUDED.email
-	`, order.OrderUID, order.Delivery.Name, order.Delivery.Phone, order.Delivery.Zip,
-		order.Delivery.City, order.Delivery.Address, order.Delivery.Region, order.Delivery.Email)
-	if err != nil {
-		return fmt.Errorf("Ошибка при записи доставки: %v", err)
-	}
+	// Используем retry механизм для операции сохранения
+	retryPolicy := retry.HeavyPolicy() // Используем тяжелую политику для критических операций
 
-	// Сохраняем информацию о платеже (UPSERT)
-	_, err = tx.Exec(ctx, `
-		INSERT INTO payment (order_uid, transaction, request_id, currency, provider, 
-			amount, payment_dt, bank, delivery_cost, goods_total, custom_fee)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		ON CONFLICT (order_uid) DO UPDATE SET
-			transaction = EXCLUDED.transaction,
-			request_id = EXCLUDED.request_id,
-			currency = EXCLUDED.currency,
-			provider = EXCLUDED.provider,
-			amount = EXCLUDED.amount,
-			payment_dt = EXCLUDED.payment_dt,
-			bank = EXCLUDED.bank,
-			delivery_cost = EXCLUDED.delivery_cost,
-			goods_total = EXCLUDED.goods_total,
-			custom_fee = EXCLUDED.custom_fee
-	`, order.OrderUID, order.Payment.Transaction, order.Payment.RequestID, order.Payment.Currency,
-		order.Payment.Provider, order.Payment.Amount, order.Payment.PaymentDT, order.Payment.Bank,
-		order.Payment.DeliveryCost, order.Payment.GoodsTotal, order.Payment.CustomFee)
-	if err != nil {
-		return fmt.Errorf("Ошибка при записи payment: %v", err)
-	}
-
-	// Удаляем старые товары заказа (для обновления)
-	_, err = tx.Exec(ctx, `DELETE FROM items WHERE order_uid = $1`,
-		order.OrderUID)
-	if err != nil {
-		return fmt.Errorf("Ошибка удаления позиций: %v", err)
-	}
-
-	// Добавляем новые товары заказа
-	for _, items := range order.Items {
-		_, err = tx.Exec(ctx, `
-			INSERT INTO items (order_uid, chrt_id, track_number, price, rid, name, 
-				sale, size, total_price, nm_id, brand, status)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		`, order.OrderUID, items.ChrtID, items.TrackNumber, items.Price, items.RID, items.Name,
-			items.Sale, items.Size, items.TotalPrice, items.NMID, items.Brand, items.Status)
+	err = retry.DoWithContext(ctx, retryPolicy, func(ctx context.Context) error {
+		// Начинаем транзакцию
+		tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
 		if err != nil {
-			return fmt.Errorf("Ошибка добавления позиции: %v", err)
+			return fmt.Errorf("Ошибка начала транзакции: %v", err)
 		}
-	}
+		defer func() {
+			if err := tx.Rollback(ctx); err != nil {
+				log.Printf("Ошибка при откате транзакции: %v", err)
+			} // Откатываем транзакцию в случае ошибки
+		}()
+		// Сохраняем основную информацию о заказе (UPSERT)
+		_, err = tx.Exec(ctx, SaveOrderQuery, order.OrderUID, order.TrackNumber, order.Entry, order.Locale, order.InternalSignature,
+			order.CustomerID, order.DeliveryService, order.ShardKey, order.SMID, order.DateCreated, order.OOFShard)
+		if err != nil {
+			return fmt.Errorf("Ошибка при записи заказа: %v", err)
+		}
 
-	// Коммитим транзакцию
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("Ошибка коммита транзакции: %v", err)
-	}
-	return nil
+		// Сохраняем информацию о доставке (UPSERT)
+		_, err = tx.Exec(ctx, SaveDeliveryQuery, order.OrderUID, order.Delivery.Name, order.Delivery.Phone, order.Delivery.Zip,
+			order.Delivery.City, order.Delivery.Address, order.Delivery.Region, order.Delivery.Email)
+		if err != nil {
+			return fmt.Errorf("Ошибка при записи доставки: %v", err)
+		}
+
+		// Сохраняем информацию о платеже (UPSERT)
+		_, err = tx.Exec(ctx, SavePaymentQuery, order.OrderUID, order.Payment.Transaction, order.Payment.RequestID, order.Payment.Currency,
+			order.Payment.Provider, order.Payment.Amount, order.Payment.PaymentDT, order.Payment.Bank,
+			order.Payment.DeliveryCost, order.Payment.GoodsTotal, order.Payment.CustomFee)
+		if err != nil {
+			return fmt.Errorf("Ошибка при записи payment: %v", err)
+		}
+
+		// Удаляем старые товары заказа (для обновления)
+		_, err = tx.Exec(ctx, DeleteItemsQuery, order.OrderUID)
+		if err != nil {
+			return fmt.Errorf("Ошибка удаления позиций: %v", err)
+		}
+
+		// Добавляем новые товары заказа
+		for _, items := range order.Items {
+			_, err = tx.Exec(ctx, SaveItemQuery, order.OrderUID, items.ChrtID, items.TrackNumber, items.Price, items.RID, items.Name,
+				items.Sale, items.Size, items.TotalPrice, items.NMID, items.Brand, items.Status)
+			if err != nil {
+				return fmt.Errorf("Ошибка добавления позиции: %v", err)
+			}
+		}
+
+		// Коммитим транзакцию
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("Ошибка коммита транзакции: %v", err)
+		}
+		return nil
+	})
+
+	return err
 }
 
 // GetOrder получает заказ из базы данных по его UID
 func (p *Postgres) GetOrder(ctx context.Context, orderUID string) (*models.Order, error) {
-	var order models.Order
+	var order *models.Order
+	var err error
 
-	// Получаем основную информацию о заказе
-	err := p.pool.QueryRow(ctx, `SELECT order_uid, track_number, entry, locale, internal_signature, 
-			customer_id, delivery_service, shardkey, sm_id, date_created, oof_shard
-		FROM orders WHERE order_uid = $1
-	`, orderUID).Scan(
-		&order.OrderUID, &order.TrackNumber, &order.Entry, &order.Locale, &order.InternalSignature,
-		&order.CustomerID, &order.DeliveryService, &order.ShardKey, &order.SMID, &order.DateCreated, &order.OOFShard)
-	if err != nil {
-		return nil, fmt.Errorf("Ошибка получения заказа: %v", err)
-	}
+	// Используем retry механизм для операции получения заказа
+	retryPolicy := retry.DefaultPolicy() // Используем стандартную политику для операций чтения
 
-	// Получаем информацию о доставке
-	err = p.pool.QueryRow(ctx, `SELECT name, phone, zip, city, address, region, email
-		FROM delivery WHERE order_uid = $1
-	`, orderUID).Scan(
-		&order.Delivery.Name, &order.Delivery.Phone, &order.Delivery.Zip, &order.Delivery.City,
-		&order.Delivery.Address, &order.Delivery.Region, &order.Delivery.Email,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("Ошибка получения данных о доставке: %v", err)
-	}
+	err = retry.DoWithContext(ctx, retryPolicy, func(ctx context.Context) error {
+		var tempOrder models.Order
 
-	// Получаем информацию о платеже
-	err = p.pool.QueryRow(ctx, `
-		SELECT transaction, request_id, currency, provider, amount, payment_dt, 
-			bank, delivery_cost, goods_total, custom_fee
-		FROM payment WHERE order_uid = $1
-	`, orderUID).Scan(
-		&order.Payment.Transaction, &order.Payment.RequestID, &order.Payment.Currency, &order.Payment.Provider,
-		&order.Payment.Amount, &order.Payment.PaymentDT, &order.Payment.Bank, &order.Payment.DeliveryCost,
-		&order.Payment.GoodsTotal, &order.Payment.CustomFee)
-	if err != nil {
-		return nil, fmt.Errorf("Ошибка получения данных о платёжных средствах: %v", err)
-	}
-
-	// Получаем список товаров заказа
-	rows, err := p.pool.Query(ctx, `
-		SELECT chrt_id, track_number, price, rid, name, sale, size, 
-			total_price, nm_id, brand, status
-		FROM items WHERE order_uid = $1
-	`, orderUID)
-	if err != nil {
-		return nil, fmt.Errorf("Не удалось запросить items: %v", err)
-	}
-	defer rows.Close()
-
-	// Обрабатываем результаты запроса
-	order.Items = []models.Item{}
-	for rows.Next() {
-		var item models.Item
-		err := rows.Scan(&item.ChrtID, &item.TrackNumber, &item.Price, &item.RID, &item.Name, &item.Sale,
-			&item.Size, &item.TotalPrice, &item.NMID, &item.Brand, &item.Status)
+		// Получаем все данные заказа за один запрос
+		row := p.pool.QueryRow(ctx, GetOrderByUIDQuery, orderUID)
+		err := row.Scan(
+			&tempOrder.OrderUID, &tempOrder.TrackNumber, &tempOrder.Entry, &tempOrder.Locale, &tempOrder.InternalSignature,
+			&tempOrder.CustomerID, &tempOrder.DeliveryService, &tempOrder.ShardKey, &tempOrder.SMID, &tempOrder.DateCreated, &tempOrder.OOFShard,
+			&tempOrder.Delivery.Name, &tempOrder.Delivery.Phone, &tempOrder.Delivery.Zip, &tempOrder.Delivery.City,
+			&tempOrder.Delivery.Address, &tempOrder.Delivery.Region, &tempOrder.Delivery.Email,
+			&tempOrder.Payment.Transaction, &tempOrder.Payment.RequestID, &tempOrder.Payment.Currency, &tempOrder.Payment.Provider,
+			&tempOrder.Payment.Amount, &tempOrder.Payment.PaymentDT, &tempOrder.Payment.Bank, &tempOrder.Payment.DeliveryCost,
+			&tempOrder.Payment.GoodsTotal, &tempOrder.Payment.CustomFee,
+		)
 		if err != nil {
-			return nil, fmt.Errorf("Ошибка при чтении items:%v", err)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("Заказ не найден: %v", err) // Не возвращаем как ошибку для повторных попыток
+			}
+			return fmt.Errorf("Ошибка получения заказа: %v", err)
 		}
-		order.Items = append(order.Items, item)
+
+		// Получаем список товаров заказа
+		rows, err := p.pool.Query(ctx, GetItemsByOrderUIDQuery, orderUID)
+		if err != nil {
+			return fmt.Errorf("Не удалось запросить items: %v", err)
+		}
+		defer rows.Close()
+
+		// Обрабатываем результаты запроса
+		tempOrder.Items = []models.Item{}
+		for rows.Next() {
+			var item models.Item
+			err := rows.Scan(&item.ChrtID, &item.TrackNumber, &item.Price, &item.RID, &item.Name, &item.Sale,
+				&item.Size, &item.TotalPrice, &item.NMID, &item.Brand, &item.Status)
+			if err != nil {
+				return fmt.Errorf("Ошибка при чтении items:%v", err)
+			}
+			tempOrder.Items = append(tempOrder.Items, item)
+		}
+
+		// Проверяем ошибки при итерации
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("Ошибка при переборе items: %v", err)
+		}
+
+		order = &tempOrder
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
-	// Проверяем ошибки при итерации
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("Ошибка при переборе items: %v", err)
-	}
-
-	return &order, nil
+	return order, nil
 }
 
 // GetAllOrders получает все заказы из базы данных
 func (p *Postgres) GetAllOrders(ctx context.Context) ([]models.Order, error) {
-	// Получаем список всех UID заказов
-	rows, err := p.pool.Query(ctx, "SELECT order_uid FROM orders")
-	if err != nil {
-		return nil, fmt.Errorf("Ошибка при запросе заказов: %v", err)
-	}
-	defer rows.Close()
-
-	// Получаем полную информацию о каждом заказе
 	var orders []models.Order
-	for rows.Next() {
-		var OrderUID string
-		if err := rows.Scan(&OrderUID); err != nil {
-			return nil, fmt.Errorf("Ошибка в UID заказа:%v", err)
-		}
-		// Получаем полную информацию о заказе
-		order, err := p.GetOrder(ctx, OrderUID)
+	var err error
+
+	// Используем retry механизм для операции получения всех заказов
+	retryPolicy := retry.DefaultPolicy() // Используем стандартную политику для операций чтения
+
+	err = retry.DoWithContext(ctx, retryPolicy, func(ctx context.Context) error {
+		// Получаем все данные всех заказов за один запрос
+		rows, err := p.pool.Query(ctx, GetAllOrdersQuery)
 		if err != nil {
-			log.Printf("Ошибка при получении заказа %s: %v", OrderUID, err)
-			continue // Пропускаем проблемный заказ
+			return fmt.Errorf("Ошибка при запросе заказов: %v", err)
 		}
-		orders = append(orders, *order)
+		defer rows.Close()
+
+		// Обрабатываем результаты запроса
+		orders = make([]models.Order, 0)           // Инициализируем слайс
+		orderMap := make(map[string]*models.Order) // To group orders by UID
+
+		for rows.Next() {
+			var order models.Order
+			err := rows.Scan(
+				&order.OrderUID, &order.TrackNumber, &order.Entry, &order.Locale, &order.InternalSignature,
+				&order.CustomerID, &order.DeliveryService, &order.ShardKey, &order.SMID, &order.DateCreated, &order.OOFShard,
+				&order.Delivery.Name, &order.Delivery.Phone, &order.Delivery.Zip, &order.Delivery.City,
+				&order.Delivery.Address, &order.Delivery.Region, &order.Delivery.Email,
+				&order.Payment.Transaction, &order.Payment.RequestID, &order.Payment.Currency, &order.Payment.Provider,
+				&order.Payment.Amount, &order.Payment.PaymentDT, &order.Payment.Bank, &order.Payment.DeliveryCost,
+				&order.Payment.GoodsTotal, &order.Payment.CustomFee,
+			)
+			if err != nil {
+				return fmt.Errorf("Ошибка при чтении заказа: %v", err)
+			}
+
+			orderMap[order.OrderUID] = &order
+			orders = append(orders, order)
+		}
+
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("Ошибка перебора заказов: %v", err)
+		}
+
+		for i := range orders {
+			order := &orders[i]
+			itemsRows, err := p.pool.Query(ctx, GetItemsByOrderUIDQuery, order.OrderUID)
+			if err != nil {
+				log.Printf("Ошибка при запросе товаров для заказа %s: %v", order.OrderUID, err)
+				continue
+			}
+
+			// Обрабатываем результаты запроса товаров
+			for itemsRows.Next() {
+				var item models.Item
+				err := itemsRows.Scan(&item.ChrtID, &item.TrackNumber, &item.Price, &item.RID, &item.Name, &item.Sale,
+					&item.Size, &item.TotalPrice, &item.NMID, &item.Brand, &item.Status)
+				if err != nil {
+					log.Printf("Ошибка при чтении товара для заказа %s: %v", order.OrderUID, err)
+					itemsRows.Close()
+					break
+				}
+				order.Items = append(order.Items, item)
+			}
+			itemsRows.Close()
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("Ошибка перебора заказов: %v", err)
-	}
+
 	return orders, nil
 }
 
