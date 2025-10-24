@@ -50,8 +50,17 @@ func main() {
 		log.Printf("Ошибка прогрева кэша: %v", err)
 	}
 
-	// Создание Kafka consumer для обработки новых заказов
-	kafkaConsumer := kafka.NewConsumer(cfg.KafkaBrokers, cfg.KafkaTopic, cfg.KafkaGroupID)
+	// Создание DLQ producer для обработки неудачных сообщений
+	dlqTopic := cfg.KafkaTopic + "-dlq" // Используем топик-оригинал с суффиксом DLQ
+	dlqProducer := kafka.NewDLQProducer(cfg.KafkaBrokers, dlqTopic)
+	defer func() {
+		if err := dlqProducer.Close(); err != nil {
+			log.Printf("Ошибка при закрытии DLQ producer: %v", err)
+		}
+	}()
+
+	// Создание Kafka consumer для обработки новых заказов с DLQ
+	kafkaConsumer := kafka.NewConsumerWithDLQ(cfg.KafkaBrokers, cfg.KafkaTopic, cfg.KafkaGroupID, dlqProducer)
 	defer func() {
 		if err := kafkaConsumer.Close(); err != nil {
 			log.Printf("Ошибка при закрытии Kafka consumer: %v", err)
