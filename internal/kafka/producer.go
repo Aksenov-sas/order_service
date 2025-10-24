@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"test_service/internal/models"
+	"test_service/internal/retry"
 
 	"github.com/go-faker/faker/v4"
 	"github.com/segmentio/kafka-go"
@@ -38,7 +39,7 @@ func NewProducer(brokers []string, topic string) *Producer {
 	}
 }
 
-// SendOrder отправляет заказ в Kafka
+// SendOrder отправляет заказ в Kafka с механизмом повторных попыток
 func (p *Producer) SendOrder(order *models.Order) error {
 	// Проверяем валидацию заказа перед отправкой
 	if err := order.Validate(); err != nil {
@@ -58,11 +59,21 @@ func (p *Producer) SendOrder(order *models.Order) error {
 		Time:  time.Now(),             // Временная метка
 	}
 
-	// Отправляем сообщение в Kafka
-	return p.writer.WriteMessages(context.Background(), msg)
+	// Используем retry механизм для отправки сообщения
+	retryPolicy := retry.DefaultPolicy()
+
+	return retry.DoWithContext(context.Background(), retryPolicy, func(ctx context.Context) error {
+		// Отправляем сообщение в Kafka
+		err := p.writer.WriteMessages(ctx, msg)
+		if err != nil {
+			log.Printf("Ошибка отправки сообщения в Kafka (попытка будет повторена): %v", err)
+			return err
+		}
+		return nil
+	})
 }
 
-// SendOrderWithContext отправляет заказ в Kafka с контекстом
+// SendOrderWithContext отправляет заказ в Kafka с контекстом и механизмом повторных попыток
 func (p *Producer) SendOrderWithContext(ctx context.Context, order *models.Order) error {
 	// Проверяем валидацию заказа перед отправкой
 	if err := order.Validate(); err != nil {
@@ -82,8 +93,18 @@ func (p *Producer) SendOrderWithContext(ctx context.Context, order *models.Order
 		Time:  time.Now(),             // Временная метка
 	}
 
-	// Отправляем сообщение в Kafka
-	return p.writer.WriteMessages(ctx, msg)
+	// Используем retry механизм для отправки сообщения с контекстом
+	retryPolicy := retry.DefaultPolicy()
+
+	return retry.DoWithContext(ctx, retryPolicy, func(ctx context.Context) error {
+		// Отправляем сообщение в Kafka
+		err := p.writer.WriteMessages(ctx, msg)
+		if err != nil {
+			log.Printf("Ошибка отправки сообщения в Kafka с контекстом (попытка будет повторена): %v", err)
+			return err
+		}
+		return nil
+	})
 }
 
 // Close закрывает Kafka writer
@@ -130,8 +151,10 @@ func GenerateTestOrder(index int) *models.Order {
 		items = append(items, item)
 	}
 
-	// Создаем заказ с фейковыми данными
-	orderUID := fmt.Sprintf("order_%d_%s", index, faker.UUIDDigit())
+	// Создаем заказ с фейковыми данными, обеспечивая валидный OrderUID
+	orderUID := fmt.Sprintf("testorderuid%019d", index)
+	orderUID = fmt.Sprintf("%-32s", orderUID)[:32]
+	orderUID = fmt.Sprintf("testorderuid%020d", index)
 
 	order := &models.Order{
 		OrderUID:          orderUID,
