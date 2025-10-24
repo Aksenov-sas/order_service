@@ -20,8 +20,8 @@ type Order struct {
 	OrderUID          string    `json:"order_uid" validate:"required,alphanum,len=32"`
 	TrackNumber       string    `json:"track_number" validate:"required"`
 	Entry             string    `json:"entry" validate:"required"`
-	Delivery          Delivery  `json:"delivery" validate:"required,dive"`
-	Payment           Payment   `json:"payment" validate:"required,dive"`
+	Delivery          Delivery  `json:"delivery" validate:"required"`
+	Payment           Payment   `json:"payment" validate:"required"`
 	Items             []Item    `json:"items" validate:"required,min=1,dive"`
 	Locale            string    `json:"locale" validate:"required"`
 	InternalSignature string    `json:"internal_signature"`
