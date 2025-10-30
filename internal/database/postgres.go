@@ -120,11 +120,17 @@ func (p *Postgres) SaveOrder(ctx context.Context, order *models.Order) error {
 		if err != nil {
 			return fmt.Errorf("Ошибка начала транзакции: %v", err)
 		}
+		
+		// Откатываем транзакцию только в случае ошибки
+		shouldRollback := true
 		defer func() {
-			if err := tx.Rollback(ctx); err != nil {
-				log.Printf("Ошибка при откате транзакции: %v", err)
-			} // Откатываем транзакцию в случае ошибки
+			if shouldRollback {
+				if err := tx.Rollback(ctx); err != nil {
+					log.Printf("Ошибка при откате транзакции: %v", err)
+				}
+			}
 		}()
+		
 		// Сохраняем основную информацию о заказе (UPSERT)
 		_, err = tx.Exec(ctx, SaveOrderQuery, order.OrderUID, order.TrackNumber, order.Entry, order.Locale, order.InternalSignature,
 			order.CustomerID, order.DeliveryService, order.ShardKey, order.SMID, order.DateCreated, order.OOFShard)
@@ -166,6 +172,9 @@ func (p *Postgres) SaveOrder(ctx context.Context, order *models.Order) error {
 		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("Ошибка коммита транзакции: %v", err)
 		}
+		
+		// Успешно закоммиченная транзакция не нуждается в откате
+		shouldRollback = false
 		return nil
 	})
 
