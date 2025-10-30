@@ -150,9 +150,10 @@ func TestProducer_InvalidOrderHandling(t *testing.T) {
 
 func TestProducer_ContextHandling(t *testing.T) {
 	order := &models.Order{
-		OrderUID: "testorderuid1234567890123456ab",
-		Entry:    "test_entry",
-		Locale:   "en",
+		OrderUID:    "testorderuid1234567890123456ab",
+		TrackNumber: "TESTTRACK123", // Добавляем TrackNumber
+		Entry:       "test_entry",
+		Locale:      "en",
 		Delivery: models.Delivery{
 			Name:    "Test Customer",
 			Phone:   "+1234567890",
