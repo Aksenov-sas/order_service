@@ -18,6 +18,8 @@ import (
 	"test_service/internal/kafka"
 	"test_service/internal/retry"
 	"test_service/internal/service"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -148,9 +150,10 @@ func main() {
 
 	// Настройка HTTP маршрутов
 	mux := http.NewServeMux()
-	mux.HandleFunc("/order/", h.GetOrder)    // API для получения заказа
-	mux.HandleFunc("/health", h.HealthCheck) // Проверка состояния сервиса
-	mux.HandleFunc("/stats", h.Stats)        // Статистика сервиса
+	mux.HandleFunc("/order/", h.GetOrder)                                                          // API для получения заказа
+	mux.HandleFunc("/health", h.HealthCheck)                                                       // Проверка состояния сервиса
+	mux.HandleFunc("/stats", h.Stats)                                                              // Статистика сервиса
+	mux.Handle("/metrics", promhttp.HandlerFor(kafka.GetGlobalRegistry(), promhttp.HandlerOpts{})) // Endpoint для метрик Prometheus
 
 	// Статические файлы и корневая страница
 	staticFS := http.Dir(cfg.StaticDir)
