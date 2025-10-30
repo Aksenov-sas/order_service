@@ -18,8 +18,9 @@ import (
 
 // Producer для отправки сообщений в Kafka
 type Producer struct {
-	writer *kafka.Writer // Kafka writer для отправки сообщений
-	topic  string        // Топик для отправки
+	writer  *kafka.Writer // Kafka writer для отправки сообщений
+	topic   string        // Топик для отправки
+	metrics *KafkaMetrics // Метрики для мониторинга
 }
 
 // NewProducer создает нового Kafka продюсера
@@ -35,8 +36,9 @@ func NewProducer(brokers []string, topic string) *Producer {
 		AllowAutoTopicCreation: true,                  // Разрешить автоматическое создание топика
 	}
 	return &Producer{
-		writer: writer,
-		topic:  topic,
+		writer:  writer,
+		topic:   topic,
+		metrics: NewKafkaMetrics(), // Инициализировать метрики
 	}
 }
 
@@ -44,12 +46,14 @@ func NewProducer(brokers []string, topic string) *Producer {
 func (p *Producer) SendOrder(order *models.Order) error {
 	// Валидация заказа перед отправкой
 	if err := order.Validate(); err != nil {
+		p.metrics.ProcessingErrorsTotal.Inc()
 		return fmt.Errorf("ошибка валидации заказа перед отправкой в Kafka: %w", err)
 	}
 
 	// Сериализация заказа в JSON
 	orderJSON, err := json.Marshal(order)
 	if err != nil {
+		p.metrics.ProcessingErrorsTotal.Inc()
 		return err
 	}
 
@@ -63,27 +67,38 @@ func (p *Producer) SendOrder(order *models.Order) error {
 	// Использовать механизм повторных попыток для отправки сообщения
 	retryPolicy := retry.DefaultPolicy()
 
-	return retry.DoWithContext(context.Background(), retryPolicy, func(ctx context.Context) error {
+	err = retry.DoWithContext(context.Background(), retryPolicy, func(ctx context.Context) error {
 		// Отправить сообщение в Kafka
 		err := p.writer.WriteMessages(ctx, msg)
 		if err != nil {
+			p.metrics.FailedSendsTotal.Inc()
+			p.metrics.RetryAttemptsTotal.Inc()
 			log.Printf("Ошибка отправки сообщения в Kafka (будет повторная попытка): %v", err)
 			return err
 		}
+		p.metrics.MessagesSentTotal.Inc()
 		return nil
 	})
+
+	if err != nil {
+		p.metrics.ProcessingErrorsTotal.Inc()
+	}
+
+	return err
 }
 
 // SendOrderWithContext отправляет заказ в Kafka с контекстом и механизмом повторных попыток
 func (p *Producer) SendOrderWithContext(ctx context.Context, order *models.Order) error {
 	// Валидация заказа перед отправкой
 	if err := order.Validate(); err != nil {
+		p.metrics.ProcessingErrorsTotal.Inc()
 		return fmt.Errorf("ошибка валидации заказа перед отправкой в Kafka: %w", err)
 	}
 
 	// Сериализация заказа в JSON
 	orderJSON, err := json.Marshal(order)
 	if err != nil {
+		p.metrics.ProcessingErrorsTotal.Inc()
 		return err
 	}
 
@@ -97,15 +112,24 @@ func (p *Producer) SendOrderWithContext(ctx context.Context, order *models.Order
 	// Использовать механизм повторных попыток для отправки сообщения с контекстом
 	retryPolicy := retry.DefaultPolicy()
 
-	return retry.DoWithContext(ctx, retryPolicy, func(ctx context.Context) error {
+	err = retry.DoWithContext(ctx, retryPolicy, func(ctx context.Context) error {
 		// Отправить сообщение в Kafka
 		err := p.writer.WriteMessages(ctx, msg)
 		if err != nil {
+			p.metrics.FailedSendsTotal.Inc()
+			p.metrics.RetryAttemptsTotal.Inc()
 			log.Printf("Ошибка отправки сообщения в Kafka с контекстом (будет повторная попытка): %v", err)
 			return err
 		}
+		p.metrics.MessagesSentTotal.Inc()
 		return nil
 	})
+
+	if err != nil {
+		p.metrics.ProcessingErrorsTotal.Inc()
+	}
+
+	return err
 }
 
 // Close закрывает writer Kafka

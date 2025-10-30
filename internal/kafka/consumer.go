@@ -17,6 +17,7 @@ type Consumer struct {
 	reader   *kafka.Reader // Kafka reader для чтения сообщений
 	dlq      *DLQProducer  // DLQ producer для отправки неудачных сообщений
 	maxRetry int           // Максимальное количество попыток обработки
+	metrics  *KafkaMetrics // Метрики для мониторинга
 }
 
 // NewConsumer создает новый Kafka consumer
@@ -30,7 +31,8 @@ func NewConsumer(brokers []string, topic string, groupID string) *Consumer {
 	})
 	return &Consumer{
 		reader:   reader,
-		maxRetry: 3, // Максимальное количество попыток
+		maxRetry: 3,                 // Максимальное количество попыток
+		metrics:  NewKafkaMetrics(), // Инициализировать метрики
 	}
 }
 
@@ -45,7 +47,8 @@ func NewConsumerWithDLQ(brokers []string, topic string, groupID string, dlqProdu
 	return &Consumer{
 		reader:   reader,
 		dlq:      dlqProducer,
-		maxRetry: 3, // Максимальное количество попыток по умолчанию
+		maxRetry: 3,                 // Максимальное количество попыток по умолчанию
+		metrics:  NewKafkaMetrics(), // Инициализировать метрики
 	}
 }
 
@@ -70,14 +73,18 @@ func (c *Consumer) Consume(ctx context.Context, processFunc func(*models.Order) 
 				case <-ctx.Done():
 					return nil
 				default:
+					c.metrics.FailedReceivesTotal.Inc()
 					log.Printf("Ошибка при получении сообщения: %v", err)
 					continue
 				}
 			}
 
+			c.metrics.MessagesReceivedTotal.Inc()
+
 			// Декодируем JSON сообщение в структуру заказа
 			var order models.Order
 			if err := json.Unmarshal(msg.Value, &order); err != nil {
+				c.metrics.ProcessingErrorsTotal.Inc()
 				log.Printf("Ошибка дешифровки сообщения: %v", err)
 				// Отправляем сообщение в DLQ, если DLQ настроена
 				if c.dlq != nil {
@@ -89,6 +96,7 @@ func (c *Consumer) Consume(ctx context.Context, processFunc func(*models.Order) 
 					if dlqErr := c.dlq.SendToDLQ(dlqMsg, err, 1); dlqErr != nil {
 						log.Printf("Ошибка отправки в DLQ: %v", dlqErr)
 					} else {
+						c.metrics.DLQMessagesSentTotal.Inc()
 						log.Printf("Сообщение отправлено в DLQ из-за ошибки JSON: %s", order.OrderUID)
 					}
 				}
@@ -101,6 +109,7 @@ func (c *Consumer) Consume(ctx context.Context, processFunc func(*models.Order) 
 
 			// Валидация полезной нагрузки
 			if err := order.Validate(); err != nil {
+				c.metrics.ProcessingErrorsTotal.Inc()
 				log.Printf("Невалидный заказ %v: %v", order.OrderUID, err)
 				// Отправляем сообщение в DLQ
 				if c.dlq != nil {
@@ -112,6 +121,7 @@ func (c *Consumer) Consume(ctx context.Context, processFunc func(*models.Order) 
 					if dlqErr := c.dlq.SendToDLQ(dlqMsg, err, 1); dlqErr != nil {
 						log.Printf("Ошибка отправки в DLQ: %v", dlqErr)
 					} else {
+						c.metrics.DLQMessagesSentTotal.Inc()
 						log.Printf("Сообщение отправлено в DLQ из-за ошибки валидации: %s", order.OrderUID)
 					}
 				}
@@ -123,7 +133,10 @@ func (c *Consumer) Consume(ctx context.Context, processFunc func(*models.Order) 
 			}
 
 			// Обрабатываем заказ через переданную функцию
+			startTime := time.Now()
 			if err := processFunc(&order); err != nil {
+				c.metrics.ProcessingErrorsTotal.Inc()
+				c.metrics.MessageProcessingTime.Observe(time.Since(startTime).Seconds())
 				log.Printf("Ошибка обработки заказа %s: %v", order.OrderUID, err)
 				// Отправляем сообщение в DLQ
 				if c.dlq != nil {
@@ -135,6 +148,7 @@ func (c *Consumer) Consume(ctx context.Context, processFunc func(*models.Order) 
 					if dlqErr := c.dlq.SendToDLQ(dlqMsg, err, 1); dlqErr != nil {
 						log.Printf("Ошибка отправки в DLQ: %v", dlqErr)
 					} else {
+						c.metrics.DLQMessagesSentTotal.Inc()
 						log.Printf("Сообщение отправлено в DLQ из-за ошибки обработки: %s", order.OrderUID)
 					}
 				}
@@ -144,6 +158,7 @@ func (c *Consumer) Consume(ctx context.Context, processFunc func(*models.Order) 
 				}
 				continue
 			}
+			c.metrics.MessageProcessingTime.Observe(time.Since(startTime).Seconds())
 
 			// Подтверждаем обработку сообщения
 			if err := c.reader.CommitMessages(ctx, msg); err != nil {
