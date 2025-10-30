@@ -13,14 +13,6 @@ import (
 )
 
 func TestService_WarmUpCache(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockDB := mocks.NewMockDatabase(ctrl)
-	mockCache := mocks.NewMockCache(ctrl)
-
-	svc := NewWithCache(mockDB, mockCache)
-
 	ctx := context.Background()
 	testOrders := []models.Order{
 		{OrderUID: "order-1", Locale: "en"},
@@ -28,15 +20,32 @@ func TestService_WarmUpCache(t *testing.T) {
 	}
 
 	t.Run("Success", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockDB := mocks.NewMockDatabase(ctrl)
+		mockCache := mocks.NewMockCache(ctrl)
+
+		svc := NewWithCache(mockDB, mockCache)
+
 		// Ожидаемые вызовы
 		mockDB.EXPECT().GetAllOrders(ctx).Return(testOrders, nil)
 		mockCache.EXPECT().LoadFromSlice(testOrders)
+		mockCache.EXPECT().Size().Return(len(testOrders))
 
 		err := svc.WarmUpCache(ctx)
 		assert.NoError(t, err, "загрузка кэша не должна возвращать ошибки")
 	})
 
 	t.Run("DatabaseError", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockDB := mocks.NewMockDatabase(ctrl)
+		mockCache := mocks.NewMockCache(ctrl)
+
+		svc := NewWithCache(mockDB, mockCache)
+
 		// Ожидаемый вызов с возвратом ошибки
 		mockDB.EXPECT().GetAllOrders(ctx).Return(nil, errors.New("database error"))
 
@@ -47,20 +56,19 @@ func TestService_WarmUpCache(t *testing.T) {
 }
 
 func TestService_ProcessOrder(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockDB := mocks.NewMockDatabase(ctrl)
-	mockCache := mocks.NewMockCache(ctrl)
-
-	svc := NewWithCache(mockDB, mockCache)
-
 	order := &models.Order{
 		OrderUID: "order-123",
 		Locale:   "en",
 	}
 
 	t.Run("Success", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockDB := mocks.NewMockDatabase(ctrl)
+		mockCache := mocks.NewMockCache(ctrl)
+		svc := NewWithCache(mockDB, mockCache)
+
 		// Ожидаемые вызовы
 		mockDB.EXPECT().SaveOrder(gomock.Any(), order).Return(nil)
 		mockCache.EXPECT().Set(order)
@@ -70,8 +78,15 @@ func TestService_ProcessOrder(t *testing.T) {
 	})
 
 	t.Run("DatabaseError", func(t *testing.T) {
-		// Ожидаемый вызов с возвратом ошибки
-		mockDB.EXPECT().SaveOrder(gomock.Any(), order).Return(errors.New("database error"))
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockDB := mocks.NewMockDatabase(ctrl)
+		mockCache := mocks.NewMockCache(ctrl)
+		svc := NewWithCache(mockDB, mockCache)
+
+		// Ожидаемый вызов с возвратом ошибки для всех попыток (включая retry)
+		mockDB.EXPECT().SaveOrder(gomock.Any(), order).Return(errors.New("database error")).AnyTimes()
 
 		err := svc.ProcessOrder(order)
 		assert.Error(t, err, "обработка заказа при ошибке базы данных должна возвращать ошибку")
@@ -80,20 +95,20 @@ func TestService_ProcessOrder(t *testing.T) {
 }
 
 func TestService_GetOrder(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockDB := mocks.NewMockDatabase(ctrl)
-	mockCache := mocks.NewMockCache(ctrl)
-
-	svc := NewWithCache(mockDB, mockCache)
-
 	order := &models.Order{
 		OrderUID: "order-123",
 		Locale:   "en",
 	}
 
 	t.Run("FoundInCache", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockDB := mocks.NewMockDatabase(ctrl)
+		mockCache := mocks.NewMockCache(ctrl)
+
+		svc := NewWithCache(mockDB, mockCache)
+
 		// Ожидаем, что кэш вернет заказ
 		mockCache.EXPECT().Get("order-123").Return(order, true)
 
@@ -103,6 +118,14 @@ func TestService_GetOrder(t *testing.T) {
 	})
 
 	t.Run("NotFoundInCacheButInDB", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockDB := mocks.NewMockDatabase(ctrl)
+		mockCache := mocks.NewMockCache(ctrl)
+
+		svc := NewWithCache(mockDB, mockCache)
+
 		// Ожидаем, что кэш вернет не найдено
 		mockCache.EXPECT().Get("order-123").Return(nil, false)
 		// Ожидаем, что база данных вернет заказ
@@ -116,6 +139,14 @@ func TestService_GetOrder(t *testing.T) {
 	})
 
 	t.Run("NotFoundInCacheAndDB", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockDB := mocks.NewMockDatabase(ctrl)
+		mockCache := mocks.NewMockCache(ctrl)
+
+		svc := NewWithCache(mockDB, mockCache)
+
 		// Ожидаем, что кэш вернет не найдено
 		mockCache.EXPECT().Get("order-123").Return(nil, false)
 		// Ожидаем, что база данных вернет ошибку
@@ -128,6 +159,14 @@ func TestService_GetOrder(t *testing.T) {
 	})
 
 	t.Run("CacheError", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockDB := mocks.NewMockDatabase(ctrl)
+		mockCache := mocks.NewMockCache(ctrl)
+
+		svc := NewWithCache(mockDB, mockCache)
+
 		// Мок заказа, который будет возвращен из БД
 		dbOrder := &models.Order{OrderUID: "order-123", Locale: "en"}
 
@@ -145,15 +184,15 @@ func TestService_GetOrder(t *testing.T) {
 }
 
 func TestService_GetCacheStats(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockDB := mocks.NewMockDatabase(ctrl)
-	mockCache := mocks.NewMockCache(ctrl)
-
-	svc := NewWithCache(mockDB, mockCache)
-
 	t.Run("StatsRetrieved", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockDB := mocks.NewMockDatabase(ctrl)
+		mockCache := mocks.NewMockCache(ctrl)
+
+		svc := NewWithCache(mockDB, mockCache)
+
 		// Ожидаем вызов размера кэша
 		mockCache.EXPECT().Size().Return(5)
 
@@ -165,17 +204,18 @@ func TestService_GetCacheStats(t *testing.T) {
 }
 
 func TestService_Close(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockDB := mocks.NewMockDatabase(ctrl)
-	mockCache := mocks.NewMockCache(ctrl)
-
-	svc := NewWithCache(mockDB, mockCache)
-
 	t.Run("CloseSuccessfully", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockDB := mocks.NewMockDatabase(ctrl)
+		mockCache := mocks.NewMockCache(ctrl)
+
+		svc := NewWithCache(mockDB, mockCache)
+
 		// Мок вызова закрытия БД
 		mockDB.EXPECT().Close()
+		mockCache.EXPECT().Size().Return(0).AnyTimes()
 
 		// Вызов закрытия
 		svc.Close()
@@ -187,77 +227,79 @@ func TestService_Close(t *testing.T) {
 }
 
 func TestService_ProcessOrderWithValidation(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+	t.Run("ValidationError", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
 
-	mockDB := mocks.NewMockDatabase(ctrl)
-	mockCache := mocks.NewMockCache(ctrl)
+		mockDB := mocks.NewMockDatabase(ctrl)
+		mockCache := mocks.NewMockCache(ctrl)
 
-	svc := NewWithCache(mockDB, mockCache)
+		svc := NewWithCache(mockDB, mockCache)
 
-	// Проверка с недействительным заказом
-	invalidOrder := &models.Order{
-		OrderUID: "", // Обязательное поле отсутствует
-		Locale:   "en",
-	}
+		// Проверка с недействительным заказом
+		invalidOrder := &models.Order{
+			OrderUID: "", // Обязательное поле отсутствует
+			Locale:   "en",
+		}
 
-	err := svc.ProcessOrder(invalidOrder)
-	// Это не должно возвращать ошибку валидации, так как валидация выполняется на уровне потребителя
+		mockDB.EXPECT().SaveOrder(gomock.Any(), invalidOrder).Return(errors.New("validation error")).AnyTimes()
 
-	// Проверяем, что если БД отклоняет заказ из-за валидации, это обрабатывается
-	mockDB.EXPECT().SaveOrder(gomock.Any(), invalidOrder).Return(errors.New("validation error"))
-
-	err = svc.ProcessOrder(invalidOrder)
-	assert.Error(t, err, "обработка недействительного заказа должна возвращать ошибку")
+		// Проверяем, что если БД отклоняет заказ из-за валидации, это обрабатывается
+		err := svc.ProcessOrder(invalidOrder)
+		assert.Error(t, err, "обработка недействительного заказа должна возвращать ошибку")
+	})
 }
 
 func TestService_GetOrderConcurrency(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+	t.Run("ConcurrencyTest", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
 
-	mockDB := mocks.NewMockDatabase(ctrl)
-	mockCache := mocks.NewMockCache(ctrl)
+		mockDB := mocks.NewMockDatabase(ctrl)
+		mockCache := mocks.NewMockCache(ctrl)
 
-	svc := NewWithCache(mockDB, mockCache)
+		svc := NewWithCache(mockDB, mockCache)
 
-	// Проверяем, что одновременный доступ не вызывает гонки
-	done := make(chan bool, 2)
+		// Проверяем, что одновременный доступ не вызывает гонки
+		done := make(chan bool, 2)
 
-	// Горутина 1: Получение заказа из кэша
-	go func() {
-		order := &models.Order{OrderUID: "order-1", Locale: "en"}
-		mockCache.EXPECT().Get("order-1").Return(order, true).AnyTimes()
-		_, _ = svc.GetOrder("order-1")
-		done <- true
-	}()
+		// Горутина 1: Получение заказа из кэша
+		go func() {
+			order := &models.Order{OrderUID: "order-1", Locale: "en"}
+			mockCache.EXPECT().Get("order-1").Return(order, true).AnyTimes()
+			_, _ = svc.GetOrder("order-1")
+			done <- true
+		}()
 
-	// Горутина 2: Обработка заказа
-	go func() {
-		order := &models.Order{OrderUID: "order-2", Locale: "en"}
-		mockDB.EXPECT().SaveOrder(gomock.Any(), order).Return(nil).AnyTimes()
-		mockCache.EXPECT().Set(order).AnyTimes()
-		_ = svc.ProcessOrder(order)
-		done <- true
-	}()
+		// Горутина 2: Обработка заказа
+		go func() {
+			order := &models.Order{OrderUID: "order-2", Locale: "en"}
+			mockDB.EXPECT().SaveOrder(gomock.Any(), order).Return(nil).AnyTimes()
+			mockCache.EXPECT().Set(order).AnyTimes()
+			_ = svc.ProcessOrder(order)
+			done <- true
+		}()
 
-	// Ждем завершения обеих горутин
-	<-done
-	<-done
+		// Ждем завершения обеих горутин
+		<-done
+		<-done
+	})
 }
 
 func TestService_WarmUpCacheWithEmptyDB(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockDB := mocks.NewMockDatabase(ctrl)
-	mockCache := mocks.NewMockCache(ctrl)
-
-	svc := NewWithCache(mockDB, mockCache)
-
 	t.Run("EmptyDatabase", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockDB := mocks.NewMockDatabase(ctrl)
+		mockCache := mocks.NewMockCache(ctrl)
+
+		svc := NewWithCache(mockDB, mockCache)
+
 		// Ожидаемые вызовы
 		mockDB.EXPECT().GetAllOrders(gomock.Any()).Return([]models.Order{}, nil)
 		mockCache.EXPECT().LoadFromSlice([]models.Order{})
+		mockCache.EXPECT().Size().Return(0)
 
 		err := svc.WarmUpCache(context.Background())
 		assert.NoError(t, err, "загрузка кэша из пустой БД не должна возвращать ошибки")
