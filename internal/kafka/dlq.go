@@ -21,8 +21,9 @@ type DLQMessage struct {
 
 // DLQProducer для отправки сообщений в DLQ
 type DLQProducer struct {
-	writer *kafka.Writer
-	topic  string
+	writer  *kafka.Writer
+	topic   string
+	metrics *KafkaMetrics
 }
 
 // NewDLQProducer создает новый DLQ producer
@@ -38,8 +39,9 @@ func NewDLQProducer(brokers []string, dlqTopic string) *DLQProducer {
 		AllowAutoTopicCreation: true,
 	}
 	return &DLQProducer{
-		writer: writer,
-		topic:  dlqTopic,
+		writer:  writer,
+		topic:   dlqTopic,
+		metrics: NewKafkaMetrics(),
 	}
 }
 
@@ -65,7 +67,14 @@ func (d *DLQProducer) SendToDLQ(originalMsg kafka.Message, err error, attempts i
 		Time:  time.Now(),
 	}
 
-	return d.writer.WriteMessages(context.Background(), dlqKafkaMsg)
+	sendErr := d.writer.WriteMessages(context.Background(), dlqKafkaMsg)
+	if sendErr != nil {
+		d.metrics.FailedSendsTotal.Inc()
+		return sendErr
+	}
+
+	d.metrics.DLQMessagesSentTotal.Inc()
+	return nil
 }
 
 // Close закрывает DLQ producer
