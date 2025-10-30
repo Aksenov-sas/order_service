@@ -83,10 +83,15 @@ func TestGenerateTestOrderWithValidation(t *testing.T) {
 func TestProducer_SendOrder(t *testing.T) {
 	// Проверка, что функция не дает сбоев при допустимых входных данных.
 	order := &models.Order{
-		OrderUID:    "test-order-uid-1234567890123456789012",
-		TrackNumber: "TESTTRACK123",
-		Entry:       "test_entry",
-		Locale:      "en",
+		OrderUID:        "testorderuid1234567890123456abcd", // Exactly 32 alphanumeric characters
+		TrackNumber:     "TESTTRACK123",
+		Entry:           "test_entry",
+		Locale:          "en",
+		CustomerID:      "customer123",
+		DeliveryService: "delivery_service",
+		ShardKey:        "shard1",
+		SMID:            1,
+		OOFShard:        "oof_shard1",
 		Delivery: models.Delivery{
 			Name:    "Test Customer",
 			Phone:   "+1234567890",
@@ -145,10 +150,42 @@ func TestProducer_InvalidOrderHandling(t *testing.T) {
 
 func TestProducer_ContextHandling(t *testing.T) {
 	order := &models.Order{
-		OrderUID:    "test-order-uid-1234567890123456789012",
-		TrackNumber: "TESTTRACK123",
-		Entry:       "test_entry",
-		Locale:      "en",
+		OrderUID: "testorderuid1234567890123456ab",
+		Entry:    "test_entry",
+		Locale:   "en",
+		Delivery: models.Delivery{
+			Name:    "Test Customer",
+			Phone:   "+1234567890",
+			Zip:     "12345",
+			City:    "Test City",
+			Address: "Test Address",
+			Region:  "Test Region",
+			Email:   "test@example.com",
+		},
+		Payment: models.Payment{
+			Transaction:  "test_transaction",
+			Currency:     "USD",
+			Provider:     "test_provider",
+			Amount:       1000,
+			PaymentDT:    time.Now().Unix(),
+			Bank:         "Test Bank",
+			DeliveryCost: 200,
+			GoodsTotal:   800,
+			CustomFee:    0,
+		},
+		Items: []models.Item{
+			{
+				ChrtID:      123456,
+				TrackNumber: "TESTTRACK123",
+				Price:       800,
+				RID:         "test_rid",
+				Name:        "Test Item",
+				Size:        "M",
+				TotalPrice:  800,
+				NMID:        789012,
+				Brand:       "Test Brand",
+			},
+		},
 	}
 
 	t.Run("ValidOrderStructure", func(t *testing.T) {
