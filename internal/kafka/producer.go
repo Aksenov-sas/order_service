@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"time"
 
 	"test_service/internal/models"
@@ -21,7 +22,7 @@ type Producer struct {
 	topic  string        // Топик для отправки
 }
 
-// NewProducer создает новый Kafka producer
+// NewProducer создает нового Kafka продюсера
 func NewProducer(brokers []string, topic string) *Producer {
 	writer := &kafka.Writer{
 		Addr:                   kafka.TCP(brokers...), // Адреса брокеров Kafka
@@ -29,9 +30,9 @@ func NewProducer(brokers []string, topic string) *Producer {
 		Balancer:               &kafka.LeastBytes{},   // Балансировщик по наименьшему количеству байт
 		WriteTimeout:           10 * time.Second,      // Таймаут на запись
 		ReadTimeout:            10 * time.Second,      // Таймаут на чтение
-		RequiredAcks:           kafka.RequireAll,      // Подтверждение от всех реплик
+		RequiredAcks:           kafka.RequireAll,      // Требовать подтверждения от всех реплик
 		MaxAttempts:            3,                     // Максимальное количество попыток
-		AllowAutoTopicCreation: true,                  // Разрешить автосоздание топика
+		AllowAutoTopicCreation: true,                  // Разрешить автоматическое создание топика
 	}
 	return &Producer{
 		writer: writer,
@@ -41,32 +42,32 @@ func NewProducer(brokers []string, topic string) *Producer {
 
 // SendOrder отправляет заказ в Kafka с механизмом повторных попыток
 func (p *Producer) SendOrder(order *models.Order) error {
-	// Проверяем валидацию заказа перед отправкой
+	// Валидация заказа перед отправкой
 	if err := order.Validate(); err != nil {
 		return fmt.Errorf("ошибка валидации заказа перед отправкой в Kafka: %w", err)
 	}
 
-	// Сериализуем заказ в JSON
+	// Сериализация заказа в JSON
 	orderJSON, err := json.Marshal(order)
 	if err != nil {
 		return err
 	}
 
-	// Создаем сообщение для отправки
+	// Создание сообщения для отправки
 	msg := kafka.Message{
-		Key:   []byte(order.OrderUID), // Используем OrderUID как ключ
+		Key:   []byte(order.OrderUID), // Использовать OrderUID в качестве ключа
 		Value: orderJSON,              // Тело сообщения - JSON заказа
 		Time:  time.Now(),             // Временная метка
 	}
 
-	// Используем retry механизм для отправки сообщения
+	// Использовать механизм повторных попыток для отправки сообщения
 	retryPolicy := retry.DefaultPolicy()
 
 	return retry.DoWithContext(context.Background(), retryPolicy, func(ctx context.Context) error {
-		// Отправляем сообщение в Kafka
+		// Отправить сообщение в Kafka
 		err := p.writer.WriteMessages(ctx, msg)
 		if err != nil {
-			log.Printf("Ошибка отправки сообщения в Kafka (попытка будет повторена): %v", err)
+			log.Printf("Ошибка отправки сообщения в Kafka (будет повторная попытка): %v", err)
 			return err
 		}
 		return nil
@@ -75,39 +76,39 @@ func (p *Producer) SendOrder(order *models.Order) error {
 
 // SendOrderWithContext отправляет заказ в Kafka с контекстом и механизмом повторных попыток
 func (p *Producer) SendOrderWithContext(ctx context.Context, order *models.Order) error {
-	// Проверяем валидацию заказа перед отправкой
+	// Валидация заказа перед отправкой
 	if err := order.Validate(); err != nil {
 		return fmt.Errorf("ошибка валидации заказа перед отправкой в Kafka: %w", err)
 	}
 
-	// Сериализуем заказ в JSON
+	// Сериализация заказа в JSON
 	orderJSON, err := json.Marshal(order)
 	if err != nil {
 		return err
 	}
 
-	// Создаем сообщение для отправки
+	// Создание сообщения для отправки
 	msg := kafka.Message{
-		Key:   []byte(order.OrderUID), // Используем OrderUID как ключ
+		Key:   []byte(order.OrderUID), // Использовать OrderUID в качестве ключа
 		Value: orderJSON,              // Тело сообщения - JSON заказа
 		Time:  time.Now(),             // Временная метка
 	}
 
-	// Используем retry механизм для отправки сообщения с контекстом
+	// Использовать механизм повторных попыток для отправки сообщения с контекстом
 	retryPolicy := retry.DefaultPolicy()
 
 	return retry.DoWithContext(ctx, retryPolicy, func(ctx context.Context) error {
-		// Отправляем сообщение в Kafka
+		// Отправить сообщение в Kafka
 		err := p.writer.WriteMessages(ctx, msg)
 		if err != nil {
-			log.Printf("Ошибка отправки сообщения в Kafka с контекстом (попытка будет повторена): %v", err)
+			log.Printf("Ошибка отправки сообщения в Kafka с контекстом (будет повторная попытка): %v", err)
 			return err
 		}
 		return nil
 	})
 }
 
-// Close закрывает Kafka writer
+// Close закрывает writer Kafka
 func (p *Producer) Close() error {
 	return p.writer.Close()
 }
@@ -118,24 +119,72 @@ func GenerateTestOrder(index int) *models.Order {
 	var payment models.Payment
 	var items []models.Item
 
-	// Генерируем фейковые данные для доставки
+	// Генерация фейковых данных для доставки
 	_ = faker.FakeData(&delivery)
-	// Устанавливаем OrderUID в пустое значение, так как мы его устанавливаем отдельно
+	// Установить OrderUID в пустое значение, так как мы устанавливаем его отдельно
 	delivery.OrderUID = ""
+	// Обеспечить валидность email
+	if delivery.Email == "" || !isValidEmail(delivery.Email) {
+		delivery.Email = fmt.Sprintf("test%d@example.com", index)
+	}
 
-	// Генерируем фейковые данные для платежа
+	// Обеспечить, чтобы строковые поля не превышали ограничения базы данных
+	if len(delivery.Name) > 255 {
+		delivery.Name = delivery.Name[:255]
+	}
+	if len(delivery.Phone) > 255 {
+		delivery.Phone = delivery.Phone[:255]
+	}
+	if len(delivery.Zip) > 255 {
+		delivery.Zip = delivery.Zip[:255]
+	}
+	if len(delivery.City) > 255 {
+		delivery.City = delivery.City[:255]
+	}
+	if len(delivery.Address) > 255 {
+		delivery.Address = delivery.Address[:255]
+	}
+	if len(delivery.Region) > 255 {
+		delivery.Region = delivery.Region[:255]
+	}
+	if len(delivery.Email) > 255 {
+		delivery.Email = delivery.Email[:255]
+	}
+
+	// Генерация фейковых данных для оплаты
 	_ = faker.FakeData(&payment)
-	// Устанавливаем OrderUID в пустое значение, так как мы его устанавливаем отдельно
+	// Установить OrderUID в пустое значение, так как мы устанавливаем его отдельно
 	payment.OrderUID = ""
+	// Обеспечить, чтобы PaymentDT было больше 0
+	if payment.PaymentDT <= 0 {
+		payment.PaymentDT = time.Now().Unix()
+	}
 
-	// Создаем фейковые товары (от 1 до 5 товаров)
+	// Обеспечить, чтобы строковые поля не превышали ограничения базы данных
+	if len(payment.Currency) > 10 {
+		payment.Currency = payment.Currency[:10]
+	}
+	if len(payment.Provider) > 255 {
+		payment.Provider = payment.Provider[:255]
+	}
+	if len(payment.Bank) > 255 {
+		payment.Bank = payment.Bank[:255]
+	}
+	if len(payment.Transaction) > 255 {
+		payment.Transaction = payment.Transaction[:255]
+	}
+	if len(payment.RequestID) > 255 {
+		payment.RequestID = payment.RequestID[:255]
+	}
+
+	// Создание фейковых товаров (от 1 до 5 товаров)
 	numItems := 1 + index%5 // от 1 до 5 товаров
 	for i := 0; i < numItems; i++ {
 		var item models.Item
 		_ = faker.FakeData(&item)
-		item.OrderUID = "" // Устанавливаем OrderUID в пустое значение
+		item.OrderUID = "" // Установить OrderUID в пустое значение
 
-		// Убедимся, что цены и ID положительные
+		// Обеспечить, чтобы цены и ID были положительными
 		if item.Price <= 0 {
 			item.Price = 100 + (index*10+i*5)%1000
 		}
@@ -148,32 +197,73 @@ func GenerateTestOrder(index int) *models.Order {
 		if item.NMID <= 0 {
 			item.NMID = 100000000 + (index*1000+i*100)%800000000
 		}
+
+		// Обеспечить, чтобы строковые поля не превышали ограничения базы данных
+		if len(item.TrackNumber) > 255 {
+			item.TrackNumber = item.TrackNumber[:255]
+		}
+		if len(item.RID) > 255 {
+			item.RID = item.RID[:255]
+		}
+		if len(item.Name) > 255 {
+			item.Name = item.Name[:255]
+		}
+		if len(item.Size) > 255 {
+			item.Size = item.Size[:255]
+		}
+		if len(item.Brand) > 255 {
+			item.Brand = item.Brand[:255]
+		}
+
 		items = append(items, item)
 	}
 
-	// Создаем заказ с фейковыми данными, обеспечивая валидный OrderUID
-	orderUID := fmt.Sprintf("testorderuid%019d", index)
-	orderUID = fmt.Sprintf("%-32s", orderUID)[:32]
-	orderUID = fmt.Sprintf("testorderuid%020d", index)
+	// Создание заказа с фейковыми данными, обеспечивая валидный OrderUID (32 буквенно-цифровых символа)
+	orderUID := fmt.Sprintf("testorderuid%020d", index)
+	orderUID = orderUID[:32] // Обеспечить ровно 32 символа
+	// Обеспечить, чтобы строка была буквенно-цифровой
+	orderUID = fmt.Sprintf("testorderuid%020d", index)[:32]
 
-	order := &models.Order{
-		OrderUID:          orderUID,
-		TrackNumber:       faker.UUIDDigit(),
-		Entry:             faker.Word(),
-		Locale:            faker.Word(),
-		InternalSignature: "",
-		CustomerID:        faker.UUIDDigit(),
-		DeliveryService:   faker.Word(),
-		ShardKey:          faker.UUIDDigit(),
-		SMID:              1 + (index % 999999),
-		DateCreated:       time.Now(),
-		OOFShard:          faker.UUIDHyphenated(),
-		Delivery:          delivery,
-		Payment:           payment,
-		Items:             items,
+	// Генерация фейковых данных для основной структуры заказа
+	var order models.Order
+	_ = faker.FakeData(&order)
+
+	// Установка конкретных значений, которые должны соответствовать требованиям
+	order.OrderUID = orderUID
+	order.TrackNumber = fmt.Sprintf("TRACK%010d", index) // Обеспечить, чтобы не было пустым
+	order.Entry = "TestEntry"                            // Обеспечить, чтобы не было пустым
+	order.Locale = "en"                                  // Обеспечить, чтобы не было пустым и в рамках ограничения длины
+	order.InternalSignature = ""
+	order.CustomerID = fmt.Sprintf("customer_%d", index) // Обеспечить, чтобы не было пустым
+	order.DeliveryService = "delivery_service"           // Обеспечить, чтобы не было пустым
+	order.ShardKey = fmt.Sprintf("shard_%d", index)      // Обеспечить, чтобы не было пустым
+	order.SMID = 1 + (index % 999999)                    // Обеспечить, чтобы было > 0
+	order.DateCreated = time.Now()
+	order.OOFShard = fmt.Sprintf("oof_shard_%d", index) // Обеспечить, чтобы не было пустым
+
+	// Назначение связанных структур
+	order.Delivery = delivery
+	order.Payment = payment
+	order.Items = items
+
+	// Обеспечить, чтобы все необходимые поля оплаты были заполнены
+	if order.Payment.Transaction == "" {
+		order.Payment.Transaction = fmt.Sprintf("trans_%d", index)
+	}
+	if order.Payment.Currency == "" {
+		order.Payment.Currency = "USD"
+	}
+	if order.Payment.Provider == "" {
+		order.Payment.Provider = "provider_test"
+	}
+	if order.Payment.Bank == "" {
+		order.Payment.Bank = "TestBank"
+	}
+	if order.Payment.PaymentDT <= 0 {
+		order.Payment.PaymentDT = time.Now().Unix()
 	}
 
-	// Убедимся, что важные поля валидны
+	// Обеспечить валидность важных полей
 	if order.Payment.Amount <= 0 {
 		order.Payment.Amount = 100 + (index*10)%10000
 	}
@@ -187,10 +277,21 @@ func GenerateTestOrder(index int) *models.Order {
 		}
 	}
 
-	// Проверяем валидацию сгенерированного заказа
+	// Валидация сгенерированного заказа
 	if err := order.Validate(); err != nil {
 		log.Printf("Сгенерированный заказ не прошел валидацию: %v, будет исправлен", err)
 	}
 
-	return order
+	return &order
+}
+
+// isValidEmail проверяет, является ли строка валидным email адресом
+func isValidEmail(email string) bool {
+	if len(email) <= 0 {
+		return false
+	}
+
+	// Использовать регулярное выражение для валидации email
+	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+	return emailRegex.MatchString(email)
 }
