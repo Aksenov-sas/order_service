@@ -73,8 +73,8 @@ func (s *Service) WarmUpCache(ctx context.Context) error {
 
 // ProcessOrder обрабатывает новый заказ: сохраняет в БД и добавляет в кэш
 func (s *Service) ProcessOrder(order *models.Order) error {
-	// Создаем контекст с таймаутом 10 секунд
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Создаем контекст с таймаутом 60 секунд, чтобы учесть возможные повторные попытки
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	// Если дата создания не установлена, устанавливаем текущее время
@@ -121,7 +121,7 @@ func (s *Service) GetOrder(orderUID string) (*models.Order, error) {
 	}
 
 	// Заказ не найден в кэше, ищем в базе данных
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	order, err := s.db.GetOrder(ctx, orderUID)
