@@ -150,10 +150,10 @@ func main() {
 
 	// Настройка HTTP маршрутов
 	mux := http.NewServeMux()
-	mux.HandleFunc("/order/", h.GetOrder)                                                          // API для получения заказа
-	mux.HandleFunc("/health", h.HealthCheck)                                                       // Проверка состояния сервиса
-	mux.HandleFunc("/stats", h.Stats)                                                              // Статистика сервиса
-	mux.Handle("/metrics", promhttp.HandlerFor(kafka.GetGlobalRegistry(), promhttp.HandlerOpts{})) // Endpoint для метрик Prometheus
+	mux.HandleFunc("/order/", h.GetOrder)      // API для получения заказа
+	mux.HandleFunc("/health", h.HealthCheck)   // Проверка состояния сервиса
+	mux.HandleFunc("/stats", h.Stats)          // Статистика сервиса
+	mux.Handle("/metrics", promhttp.Handler()) // Endpoint для метрик Prometheus (используем глобальный реестр)
 
 	// Статические файлы и корневая страница
 	staticFS := http.Dir(cfg.StaticDir)
